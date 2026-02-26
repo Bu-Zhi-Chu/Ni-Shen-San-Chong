@@ -78,7 +78,7 @@ COOLDOWN_QUOTA = 20        # 配额耗尽: 20 秒
 COOLDOWN_STRUCTURAL = 10   # 结构性错误: 10 秒（上层会快速识别处理）
 COOLDOWN_TRANSIENT = 5     # 瞬时错误: 5 秒（超时/连接失败，很可能快速恢复）
 COOLDOWN_DEFAULT = 30      # 默认: 30 秒
-COOLDOWN_GLOBAL_FAILURE = 3  # 全局故障（所有端点同时失败）: 3 秒
+COOLDOWN_GLOBAL_FAILURE = 10  # 全局故障（所有端点同时失败）: 10 秒
 
 # 渐进式冷静期退避 —— 连续失败时按次数递增，上限 1 分钟
 COOLDOWN_ESCALATION_STEPS = [5, 10, 20, 60]  # 5s -> 10s -> 20s -> 60s(上限)
@@ -302,11 +302,14 @@ class LLMProvider(ABC):
         Args:
             seconds: 新的冷静期秒数（从现在开始计算）
 
-        注意：渐进退避冷静期也可以被缩短（旧版 1h 升级冷静期不可被缩短，
-        但新版上限 5min 无此限制）。
+        注意：如果缩短了渐进退避冷静期，必须同步清除 _is_extended_cooldown，
+        否则缩短后的冷静期到期时 is_healthy 会误以为完整退避已完成，
+        错误重置 _consecutive_cooldowns，导致渐进退避永远无法升级。
         """
         new_until = time.time() + seconds
         if self._cooldown_until > new_until:
+            if self._is_extended_cooldown:
+                self._is_extended_cooldown = False
             self._cooldown_until = new_until
 
     @staticmethod

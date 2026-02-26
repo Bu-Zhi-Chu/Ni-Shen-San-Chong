@@ -635,7 +635,9 @@ class ReasoningEngine:
                     e, task_monitor, state, working_messages, current_model
                 )
                 if retry_result == "retry":
-                    _sleep = asyncio.create_task(asyncio.sleep(2))
+                    _total_r = getattr(state, '_total_llm_retries', 1)
+                    _retry_sleep = min(2 * _total_r, 15)
+                    _sleep = asyncio.create_task(asyncio.sleep(_retry_sleep))
                     _cw = asyncio.create_task(state.cancel_event.wait())
                     _done, _pend = await asyncio.wait({_sleep, _cw}, return_when=asyncio.FIRST_COMPLETED)
                     for _t in _pend:
@@ -1415,7 +1417,9 @@ class ReasoningEngine:
                     yield {"type": "thinking_end", "duration_ms": _thinking_duration}
 
                     if retry_result == "retry":
-                        _sleep = asyncio.create_task(asyncio.sleep(2))
+                        _total_r = getattr(state, '_total_llm_retries', 1)
+                        _retry_sleep = min(2 * _total_r, 15)
+                        _sleep = asyncio.create_task(asyncio.sleep(_retry_sleep))
                         _cw = asyncio.create_task(state.cancel_event.wait())
                         _done, _pend = await asyncio.wait({_sleep, _cw}, return_when=asyncio.FIRST_COMPLETED)
                         for _t in _pend:
@@ -3019,13 +3023,24 @@ class ReasoningEngine:
             )
             return None
 
-        self._switch_llm_endpoint(new_model, reason=f"LLM error fallback: {error}")
+        # 切换前先重置目标端点的冷静期：所有端点刚刚失败，
+        # fallback 端点必然处于冷静期，不重置的话 switch_model 会拒绝切换
+        llm_client = getattr(self._brain, "_llm_client", None)
+        if llm_client and resolved:
+            llm_client.reset_endpoint_cooldown(resolved)
+
+        switched = self._switch_llm_endpoint(new_model, reason=f"LLM error fallback: {error}")
+        if not switched:
+            logger.warning(
+                f"[ModelSwitch] _switch_llm_endpoint failed for '{new_model}', "
+                f"proceeding with model switch anyway (endpoint selection will use fallback strategy)"
+            )
         task_monitor.switch_model(new_model, "LLM 调用失败后切换", reset_context=True)
 
         try:
-            llm_client = getattr(self._brain, "_llm_client", None)
-            current = llm_client.get_current_model() if llm_client else None
-            new_model = current.model if current else new_model
+            if llm_client:
+                current = llm_client.get_current_model()
+                new_model = current.model if current else new_model
         except Exception:
             pass
 

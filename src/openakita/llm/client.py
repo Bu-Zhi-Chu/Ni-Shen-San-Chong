@@ -1038,20 +1038,25 @@ class LLMClient:
         # 所有端点在同一次请求中连续失败，且主要是瞬时错误（超时/连接）
         # → 很可能是主机网络波动，而非端点本身异常
         # → 缩短冷静期，让系统尽快恢复
+        # 但不覆盖已处于渐进退避的端点（连续多次失败已触发递增冷静期，
+        # 强制缩短会破坏退避机制，导致持续故障时高频无效轰炸）
         if len(failed_providers) >= 2:
             transient_count = sum(
                 1 for fp in failed_providers if fp.error_category == "transient"
             )
             if transient_count >= len(failed_providers) * 0.5:
-                # 多数为瞬时错误 → 判定为全局网络故障
-                logger.warning(
-                    f"[LLM] Global failure detected: {len(failed_providers)} endpoints failed "
-                    f"({transient_count} transient). Likely network issue on host. "
-                    f"Shortening cooldowns to {COOLDOWN_GLOBAL_FAILURE}s for quick recovery."
-                )
+                shortened = 0
                 for fp in failed_providers:
-                    if fp.error_category == "transient":
+                    if fp.error_category == "transient" and not fp.is_extended_cooldown:
                         fp.shorten_cooldown(COOLDOWN_GLOBAL_FAILURE)
+                        shortened += 1
+                if shortened:
+                    logger.warning(
+                        f"[LLM] Global failure detected: {len(failed_providers)} endpoints failed "
+                        f"({transient_count} transient). Likely network issue on host. "
+                        f"Shortened {shortened} endpoint cooldowns to {COOLDOWN_GLOBAL_FAILURE}s "
+                        f"(skipped {transient_count - shortened} with progressive backoff)."
+                    )
 
         # 工具上下文下所有端点都失败
         if not allow_failover:
@@ -1133,6 +1138,28 @@ class LLMClient:
                         if block_type in ("tool_use", "tool_result"):
                             return True
         return False
+
+    def reset_endpoint_cooldown(self, endpoint_name: str) -> bool:
+        """重置指定端点的冷静期
+
+        用于模型切换前确保目标端点可用。不重置连续失败计数
+        （reset_cooldown 保留 _consecutive_cooldowns，如果端点仍有问题
+        下次失败会继续递增退避）。
+
+        Returns:
+            True 如果成功重置，False 如果端点不存在
+        """
+        provider = self._providers.get(endpoint_name)
+        if not provider:
+            return False
+        if not provider.is_healthy:
+            logger.info(
+                f"[LLM] endpoint={endpoint_name} cooldown force-reset for model switch "
+                f"(was category={provider.error_category}, "
+                f"remaining={provider.cooldown_remaining}s)"
+            )
+            provider.reset_cooldown()
+        return True
 
     def reset_all_cooldowns(self, *, include_structural: bool = False, force_all: bool = False):
         """重置端点冷静期
