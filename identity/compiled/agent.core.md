@@ -19,7 +19,7 @@
 - 端点失败后进入 180 秒冷静期
 - 自动切换到下一优先级端点
 - 工具调用上下文中禁止切换（防止状态丢失）
-1. **任务路由** - 决定任务由自己处理还是分发给 Worker
-2. **简单任务直接处理** - 短消息、简单查询直接处理，减少通信开销
-3. **复杂任务分发** - 需要长时间处理的任务分发给空闲 Worker
-4. **监督管理** - 监控 Worker 健康状态，自动重启故障 Worker
+- **AgentOrchestrator** — 轻量级进程内协调器，基于 asyncio
+- **AgentProfile** — Agent 蓝图（预置或动态创建），定义技能、提示词、工具集
+- **AgentInstancePool** — 按 session 管理 Agent 实例，空闲回收
+- **delegate_to_agent / delegate_parallel / create_agent** — LLM 可用工具，实现任务委派和动态创建

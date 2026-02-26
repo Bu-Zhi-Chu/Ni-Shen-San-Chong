@@ -361,12 +361,30 @@ class Agent:
         # 任务取消机制 — 统一使用 TaskState.cancelled / agent_state.is_task_cancelled
         # (旧 self._task_cancelled 已废弃，取消状态绑定到 TaskState 实例，避免全局竞态)
 
+        # Sub-agent call flag: set by orchestrator._call_agent()
+        self._is_sub_agent_call = False
+        # Agent tool names to exclude when running as sub-agent
+        self._agent_tool_names = frozenset(
+            {"delegate_to_agent", "delegate_parallel", "create_agent", "spawn_agent"}
+        )
+
         # 当前任务监控器（仅在 IM 任务执行期间设置；供 system 工具动态调整超时策略）
         self._current_task_monitor = None
 
         # 状态
         self._initialized = False
         self._running = False
+
+    @property
+    def _effective_tools(self) -> list[dict]:
+        """Tools available for the current call context.
+
+        Sub-agents must not have delegation tools to prevent
+        uncontrolled recursive delegation chains.
+        """
+        if self._is_sub_agent_call:
+            return [t for t in self._tools if t.get("name") not in self._agent_tool_names]
+        return self._tools
         self._last_finalized_trace: list[dict] = []
 
         # Agent profile and custom prompt (set by AgentFactory)
@@ -2005,12 +2023,25 @@ search_github → install_skill → 使用
         Only called when settings.multi_agent_enabled is True.
         Tells the LLM: identity, roster, delegation rules with strict priority:
         delegate > spawn > create.
+
+        Sub-agents are NOT given delegation capabilities to prevent
+        recursive delegation chains (sub-agent spawning sub-sub-agents).
         """
         from ..agents.presets import SYSTEM_PRESETS
         from ..config import settings
 
         if not settings.multi_agent_enabled:
             return ""
+
+        if self._is_sub_agent_call:
+            return (
+                "\n\n---\n"
+                "## 🔒 子 Agent 工作模式\n"
+                "你当前是被主 Agent 委派的**子 Agent**，专注完成被分配的任务即可。\n"
+                "**禁止**使用 delegate_to_agent、delegate_parallel、create_agent、"
+                "spawn_agent 等委派工具。不要创建或委派其他 Agent。\n"
+                "直接用你自己的专业工具（如 web_search、browser、read_file 等）完成任务。\n"
+            )
 
         profile = self._agent_profile
         if profile:
@@ -3914,7 +3945,7 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
                 _agent_profile_id = getattr(session.context, "agent_profile_id", "default") or "default"
             async for event in self.reasoning_engine.reason_stream(
                 messages=messages,
-                tools=self._tools,
+                tools=self._effective_tools,
                 system_prompt=system_prompt,
                 base_system_prompt=base_system_prompt,
                 task_description=task_description,
@@ -4636,7 +4667,7 @@ NEXT: 建议的下一步（如有）"""
         # === 委托给 ReasoningEngine ===
         return await self.reasoning_engine.run(
             messages,
-            tools=self._tools,
+            tools=self._effective_tools,
             system_prompt=system_prompt,
             base_system_prompt=base_system_prompt,
             task_description=task_description,
@@ -4967,7 +4998,7 @@ NEXT: 建议的下一步（如有）"""
                     model=current_model,
                     max_tokens=self.brain.max_tokens,
                     system=_build_effective_system_prompt(),
-                    tools=self._tools,
+                    tools=self._effective_tools,
                     messages=working_messages,
                     conversation_id=getattr(self, "_current_conversation_id", None),
                 )
@@ -5735,7 +5766,7 @@ NEXT: 建议的下一步（如有）"""
                     model=self.brain.model,
                     max_tokens=self.brain.max_tokens,
                     system=_build_effective_system_prompt_cli(),
-                    tools=self._tools,
+                    tools=self._effective_tools,
                     messages=messages,
                 )
             except UserCancelledError:
@@ -6142,7 +6173,7 @@ NEXT: 建议的下一步（如有）"""
                         _cancel_event,
                         max_tokens=self.brain.max_tokens,
                         system=_build_effective_system_prompt_task(),
-                        tools=self._tools,
+                        tools=self._effective_tools,
                         messages=messages,
                         conversation_id=conversation_id,
                     )

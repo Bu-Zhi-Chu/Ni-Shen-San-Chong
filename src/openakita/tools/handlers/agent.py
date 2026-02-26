@@ -35,6 +35,14 @@ class AgentToolHandler:
         self.agent = agent
 
     async def handle(self, tool_name: str, params: dict[str, Any]) -> str:
+        if getattr(self.agent, "_is_sub_agent_call", False):
+            logger.warning(
+                f"[AgentToolHandler] Blocked {tool_name} — sub-agents cannot delegate"
+            )
+            return (
+                f"❌ 你是子 Agent，不允许使用 {tool_name}。"
+                "请直接用你自己的工具完成任务。"
+            )
         if tool_name == "delegate_to_agent":
             return await self._delegate(params)
         elif tool_name == "delegate_parallel":
