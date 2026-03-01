@@ -751,7 +751,7 @@ class IMChannelHandler:
         safe_id = ""
         if hasattr(session, "session_key"):
             safe_id = session.session_key.replace(":", "__")
-        elif hasattr(self.agent, "_current_conversation_id"):
+        elif getattr(self.agent, "_current_conversation_id", None):
             safe_id = self.agent._current_conversation_id.replace(":", "__")
         if not safe_id:
             _logger.debug("[getChatHistory] fallback skipped: no safe_id resolved")

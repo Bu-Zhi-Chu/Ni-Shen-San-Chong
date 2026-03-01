@@ -33,10 +33,20 @@ class ScheduledHandler:
     def __init__(self, agent: "Agent"):
         self.agent = agent
 
+    def _get_scheduler(self):
+        """获取调度器：优先用 agent 自身的，fallback 到全局单例（多 Agent 模式）"""
+        scheduler = getattr(self.agent, "task_scheduler", None)
+        if scheduler:
+            return scheduler
+        from ...scheduler import get_active_scheduler
+        return get_active_scheduler()
+
     async def handle(self, tool_name: str, params: dict[str, Any]) -> str:
         """处理工具调用"""
-        if not hasattr(self.agent, "task_scheduler") or not self.agent.task_scheduler:
+        scheduler = self._get_scheduler()
+        if not scheduler:
             return "❌ 定时任务调度器未启动"
+        self.agent.task_scheduler = scheduler
 
         if tool_name == "schedule_task":
             return await self._schedule_task(params)
@@ -227,6 +237,12 @@ class ScheduledHandler:
         executor = getattr(self.agent, "_task_executor", None)
         if executor and getattr(executor, "gateway", None):
             return executor.gateway
+
+        # fallback: 从全局 executor 获取（多 Agent 模式）
+        from ...scheduler import get_active_executor
+        global_executor = get_active_executor()
+        if global_executor and getattr(global_executor, "gateway", None):
+            return global_executor.gateway
 
         # fallback: 从 IM 上下文获取
         from ...core.im_context import get_im_gateway
