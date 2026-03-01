@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -451,7 +452,9 @@ class AgentOrchestrator:
         last_progress_time = start
 
         state_key = f"{session.id}:{agent_profile_id}"
+        existing_state = self._sub_agent_states.get(state_key, {})
         self._sub_agent_states[state_key] = {
+            **existing_state,
             "agent_id": agent_profile_id,
             "profile_id": profile.id,
             "session_id": str(session.id),
@@ -462,6 +465,8 @@ class AgentOrchestrator:
             "elapsed_s": 0,
             "last_progress_s": 0,
             "started_at": time.time(),
+            "name": existing_state.get("name") or profile.get_display_name(),
+            "icon": existing_state.get("icon") or profile.icon or "🤖",
         }
 
         try:
@@ -621,7 +626,6 @@ class AgentOrchestrator:
             sid_part = key.split(":")[0] if ":" in key else key
             if sid_part == session_id or session_id in sid_part:
                 entry = dict(state)
-                # Attach profile display info
                 profile_id = entry.get("profile_id", "")
                 if self._profile_store:
                     profile = self._profile_store.get(profile_id)
@@ -629,6 +633,8 @@ class AgentOrchestrator:
                         entry["name"] = profile.get_display_name()
                         entry["icon"] = profile.icon or "🤖"
                     else:
+                        # Profile may have been cleaned up (ephemeral);
+                        # prefer the name/icon already stored in state
                         entry.setdefault("name", profile_id)
                         entry.setdefault("icon", "🤖")
                 else:
@@ -925,6 +931,62 @@ class AgentOrchestrator:
         logger.info("[Orchestrator] Shutdown complete")
 
 
+def _extract_file_paths(text: str) -> list[str]:
+    """Extract unique file paths from text (Windows & Unix)."""
+    patterns = [
+        r'[A-Za-z]:[/\\][\w./\\_\u4e00-\u9fff -]+\.\w{2,5}',
+        r'/(?:home|tmp|var|opt|usr)/[\w./_ -]+\.\w{2,5}',
+    ]
+    seen: set[str] = set()
+    result_paths: list[str] = []
+    for pat in patterns:
+        for fp in re.findall(pat, text):
+            fp_norm = fp.replace("\\", "/").rstrip(". ")
+            if fp_norm not in seen:
+                seen.add(fp_norm)
+                result_paths.append(fp)
+    return result_paths[:10]
+
+
+def _build_work_summary(record: dict) -> str:
+    """Build a structured work summary from a sub-agent record.
+
+    Returns a concise multi-line text (~200-500 chars) covering:
+    task, status, tools used, deliverable files, and result brief.
+    """
+    agent_name = record.get("agent_name", "unknown")
+    task = record.get("task_message", "")[:150]
+    elapsed = record.get("elapsed_s", 0)
+    tools_total = record.get("tools_total", 0)
+
+    tool_names = list(dict.fromkeys(
+        t.get("name", "") for t in record.get("tools_used", []) if t.get("name")
+    ))
+    tools_str = ", ".join(tool_names[:8]) if tool_names else "无"
+
+    result_preview = record.get("result_preview", "")
+    _fail_kw = ("❌", "失败", "Failed", "Error", "error", "Traceback")
+    failed = any(kw in result_preview[:300] for kw in _fail_kw)
+    status = "❌ 失败" if failed else "✅ 完成"
+
+    result_brief = result_preview[:300].replace("\n", " ").strip()
+    if len(result_preview) > 300:
+        result_brief += "..."
+
+    output_files = record.get("output_files") or []
+
+    lines = [
+        f"[{agent_name}] 任务: {task}",
+        f"状态: {status} | 耗时: {elapsed}秒 | 工具调用: {tools_total}次 ({tools_str})",
+    ]
+    if output_files:
+        lines.append(f"交付文件: {', '.join(output_files[:5])}")
+    if result_brief:
+        lines.append(f"结果摘要: {result_brief}")
+
+    return "\n".join(lines)
+
+
 def _persist_sub_agent_record(
     agent: Any, session: Any, message: str, result: str, start_time: float,
 ) -> None:
@@ -969,6 +1031,9 @@ def _persist_sub_agent_record(
         "started_at": datetime.fromtimestamp(start_time).isoformat(),
         "completed_at": datetime.now().isoformat(),
     }
+
+    record["output_files"] = _extract_file_paths(result or "")
+    record["work_summary"] = _build_work_summary(record)
 
     ctx = getattr(session, "context", None)
     if ctx is not None and hasattr(ctx, "sub_agent_records"):

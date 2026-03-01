@@ -217,27 +217,25 @@ export function AgentDashboardView({
         const parent = n.parent_id ? map.get(n.parent_id) : null;
         let bx: number, by: number;
         if (n.is_sub_agent) {
-          // Count ALL siblings (including already-placed ones in the map)
           const existingSiblings = Array.from(map.values()).filter(
             (s) => s.parent_id === n.parent_id && s.is_sub_agent
           );
           const totalSiblings = topoData.nodes.filter(
             (s) => s.parent_id === n.parent_id && s.is_sub_agent
           );
-          // My sequential index = how many siblings already placed + my order among new ones
           const newSiblings = totalSiblings.filter((s) => !map.has(s.id));
           const myNewIdx = newSiblings.indexOf(n);
           const seqIdx = existingSiblings.length + Math.max(myNewIdx, 0);
           const totalCount = Math.max(totalSiblings.length, seqIdx + 1);
 
-          // Fan out in a semicircle below parent
+          // Full circle around parent, centered on canvas
           const px = parent ? parent.x : CX;
-          const py = parent ? parent.y : H * 0.25;
-          const fanRadius = Math.max(140, totalCount * 60);
-          const angleStep = Math.PI / Math.max(totalCount + 1, 2);
-          const angle = angleStep * (seqIdx + 1); // angles from 0 to PI (left to right)
-          bx = px + Math.cos(Math.PI - angle) * fanRadius;
-          by = py + Math.sin(angle) * fanRadius * 0.7 + 60;
+          const py = parent ? parent.y : CY;
+          const fanRadius = Math.max(120, totalCount * 50);
+          const angleStep = (Math.PI * 2) / Math.max(totalCount, 1);
+          const angle = angleStep * seqIdx - Math.PI / 2;
+          bx = px + Math.cos(angle) * fanRadius;
+          by = py + Math.sin(angle) * fanRadius;
         } else if (n.status === "dormant") {
           // dormant: scatter across full canvas, prefer edges
           const edge = Math.random();
@@ -246,13 +244,19 @@ export function AgentDashboardView({
           else if (edge < 0.75) { bx = 60 + Math.random() * (W - 120); by = 60 + Math.random() * 80; }
           else { bx = 60 + Math.random() * (W - 120); by = H - 60 - Math.random() * 80; }
         } else {
-          // active root agents: upper-center area, spaced horizontally
+          // active root agents: spread around canvas center
           const roots = topoData.nodes.filter((r) => !r.parent_id && !r.is_sub_agent && r.status !== "dormant");
           const rIdx = roots.indexOf(n);
           const rCount = roots.length || 1;
-          const totalW = Math.min(W * 0.7, rCount * 160);
-          bx = CX - totalW / 2 + (rCount === 1 ? totalW / 2 : (rIdx / (rCount - 1)) * totalW);
-          by = H * 0.2 + Math.random() * 30;
+          if (rCount === 1) {
+            bx = CX;
+            by = CY;
+          } else {
+            const rAngle = (Math.PI * 2 * rIdx) / rCount - Math.PI / 2;
+            const rRadius = Math.min(W, H) * 0.18;
+            bx = CX + Math.cos(rAngle) * rRadius;
+            by = CY + Math.sin(rAngle) * rRadius;
+          }
         }
         const tgtR = n.status === "dormant" ? 18 : n.is_sub_agent ? 22 : 32;
         map.set(n.id, {
@@ -350,19 +354,19 @@ export function AgentDashboardView({
       for (let i = 0; i < nodes.length; i++) {
         const a = nodes[i];
         const aDorm = a.status === "dormant";
-        // repulsion between all pairs — stronger, wider range
         for (let j = i + 1; j < nodes.length; j++) {
           const b = nodes[j];
           const bDorm = b.status === "dormant";
           let dx = a.x - b.x;
           let dy = a.y - b.y;
           let dist = Math.sqrt(dx * dx + dy * dy) || 1;
-          // Extra repulsion between sibling sub-agents to prevent overlap
           const areSiblings = a.is_sub_agent && b.is_sub_agent
             && a.parent_id && a.parent_id === b.parent_id;
+          const bothRoot = !a.is_sub_agent && !b.is_sub_agent && !aDorm && !bDorm;
           const strength = areSiblings ? 30000
-            : (aDorm && bDorm) ? 6000 : (aDorm || bDorm) ? 10000 : 18000;
-          const minDist = areSiblings ? 120 : (aDorm && bDorm) ? 80 : 100;
+            : bothRoot ? 35000
+            : (aDorm && bDorm) ? 6000 : (aDorm || bDorm) ? 10000 : 22000;
+          const minDist = areSiblings ? 120 : bothRoot ? 140 : (aDorm && bDorm) ? 80 : 100;
           if (dist < minDist) dist = minDist;
           const repulse = strength / (dist * dist);
           const fx = (dx / dist) * repulse;
@@ -377,24 +381,23 @@ export function AgentDashboardView({
         if (!aDorm) {
           const parent = a.parent_id ? map.get(a.parent_id) : null;
           if (a.is_sub_agent) {
-            // Each sub-agent targets a unique fan position around parent
             const siblings = nodes.filter(
               (s) => s.parent_id === a.parent_id && s.is_sub_agent
             );
             const myIdx = siblings.indexOf(a);
             const count = siblings.length || 1;
             const px = parent ? parent.x : CX;
-            const py = parent ? parent.y : H * 0.25;
-            const fanR = Math.max(140, count * 60);
-            const step = Math.PI / Math.max(count + 1, 2);
-            const ang = step * (myIdx + 1);
-            const targetX = px + Math.cos(Math.PI - ang) * fanR;
-            const targetY = py + Math.sin(ang) * fanR * 0.7 + 60;
+            const py = parent ? parent.y : CY;
+            const fanR = Math.max(120, count * 50);
+            const angStep = (Math.PI * 2) / Math.max(count, 1);
+            const ang = angStep * myIdx - Math.PI / 2;
+            const targetX = px + Math.cos(ang) * fanR;
+            const targetY = py + Math.sin(ang) * fanR;
             a.vx += (targetX - a.x) * 0.006;
             a.vy += (targetY - a.y) * 0.006;
           } else {
             a.vx += (CX - a.x) * 0.002;
-            a.vy += (CY * 0.5 - a.y) * 0.002;
+            a.vy += (CY - a.y) * 0.002;
           }
         }
       }
