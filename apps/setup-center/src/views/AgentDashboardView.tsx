@@ -1005,14 +1005,6 @@ export function AgentDashboardView({
             onMouseLeave={() => setHovered(null)}
             onClick={(e) => { e.stopPropagation(); setSelected(n.id === selected ? null : n.id); }}
           >
-            <span className="neural-icon">
-              {n.icon.startsWith("svg:") ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                  <path d={SVG_ICON_PATHS[n.icon.slice(4)] || ""} />
-                </svg>
-              ) : n.icon}
-            </span>
             <span className="neural-name">{n.name}</span>
             {n.status === "running" && (
               <span className="neural-status-dot running" />
