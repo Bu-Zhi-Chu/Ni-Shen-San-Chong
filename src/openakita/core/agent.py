@@ -65,7 +65,7 @@ from ..tools.handlers.web_search import create_handler as create_web_search_hand
 
 # MCP 系统
 from ..tools.mcp import mcp_client
-from ..tools.mcp_catalog import MCPCatalog
+from ..tools.mcp_catalog import MCPCatalog, mcp_catalog as _shared_mcp_catalog
 from ..tools.shell import ShellTool
 from ..tools.web import WebTool
 from .agent_state import AgentState
@@ -320,9 +320,10 @@ class Agent:
             skill_registry=self.skill_registry,
         )
 
-        # MCP 系统
+        # MCP 系统（全局共享：mcp_client 和 mcp_catalog 为模块级单例，
+        # 所有 Agent 实例（含 pool agent）共享同一份服务器配置和连接状态）
         self.mcp_client = mcp_client
-        self.mcp_catalog = MCPCatalog()
+        self.mcp_catalog = _shared_mcp_catalog
         self.browser_manager = None  # 在 _start_builtin_mcp_servers 中启动
         self.pw_tools = None
         self.bu_runner = None
@@ -481,6 +482,7 @@ class Agent:
             skill_loader=self.skill_loader,
             skill_catalog=self.skill_catalog,
             shell_tool=self.shell_tool,
+            on_skill_loaded=self._update_skill_tools,
         )
 
         # 提示词组装器（委托自 _build_system_prompt 等）
@@ -1018,8 +1020,8 @@ class Agent:
             ["system_config"],
         )
 
-        # 桌面工具（仅 Windows）
-        if sys.platform == "win32":
+        # 桌面工具（仅 Windows 且依赖可用时注册，与 _tools/ToolCatalog 保持一致）
+        if _DESKTOP_AVAILABLE:
             self.handler_registry.register(
                 "desktop",
                 create_desktop_handler(self),
@@ -1234,6 +1236,7 @@ class Agent:
                 loaded = self.skill_loader.load_skill(target_dir)
                 if loaded:
                     self._skill_catalog_text = self.skill_catalog.generate_catalog()
+                    self._update_skill_tools()
                     logger.info(f"Skill installed from git: {skill_name}")
             except Exception as e:
                 logger.error(f"Failed to load installed skill: {e}")
@@ -1334,6 +1337,7 @@ class Agent:
                 loaded = self.skill_loader.load_skill(skill_dir)
                 if loaded:
                     self._skill_catalog_text = self.skill_catalog.generate_catalog()
+                    self._update_skill_tools()
                     logger.info(f"Skill installed from URL: {skill_name}")
             except Exception as e:
                 logger.error(f"Failed to load installed skill: {e}")
@@ -1764,7 +1768,9 @@ class Agent:
         skill_catalog = self.skill_catalog.generate_catalog()
 
         # MCP 清单 (Model Context Protocol 规范)
-        mcp_catalog = getattr(self, "_mcp_catalog_text", "")
+        # pool agent (lightweight=True) 跳过 _load_mcp_servers()，
+        # 但共享全局 mcp_catalog，因此从共享实例动态获取。
+        mcp_catalog = getattr(self, "_mcp_catalog_text", "") or self.mcp_catalog.get_catalog()
 
         # 相关记忆 (按任务相关性注入)
         memory_context = self.memory_manager.get_injection_context(task_description)

@@ -77,6 +77,10 @@ def _apply_allowlist_and_rebuild_catalog(request: Request) -> int:
         if hasattr(actual_agent, "_skill_catalog_text"):
             actual_agent._skill_catalog_text = new_text
 
+    # 同步系统技能的 tool_name → handler 映射到 handler_registry
+    if hasattr(actual_agent, "_update_skill_tools"):
+        actual_agent._update_skill_tools()
+
     return removed
 
 

@@ -315,8 +315,9 @@ class SkillsHandler:
             loaded = self.agent.skill_loader.load_skill(skill_dir)
 
             if loaded:
-                # 刷新技能目录缓存
+                # 刷新技能目录缓存 + handler 映射
                 self.agent._skill_catalog_text = self.agent.skill_catalog.generate_catalog()
+                self.agent._update_skill_tools()
 
                 logger.info(f"Skill loaded: {skill_name}")
 
@@ -349,8 +350,9 @@ class SkillsHandler:
             reloaded = self.agent.skill_loader.reload_skill(skill_name)
 
             if reloaded:
-                # 刷新技能目录缓存
+                # 刷新技能目录缓存 + handler 映射
                 self.agent._skill_catalog_text = self.agent.skill_catalog.generate_catalog()
+                self.agent._update_skill_tools()
 
                 logger.info(f"Skill reloaded: {skill_name}")
 
@@ -462,6 +464,7 @@ class SkillsHandler:
             if catalog:
                 catalog.invalidate_cache()
                 self.agent._skill_catalog_text = catalog.generate_catalog()
+            self.agent._update_skill_tools()
         except Exception as e:
             logger.warning(f"Post-manage reload failed: {e}")
 

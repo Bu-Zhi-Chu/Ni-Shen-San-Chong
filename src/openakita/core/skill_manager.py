@@ -35,6 +35,7 @@ class SkillManager:
         skill_loader: Any,
         skill_catalog: Any,
         shell_tool: Any,
+        on_skill_loaded: Any = None,
     ) -> None:
         """
         Args:
@@ -42,11 +43,13 @@ class SkillManager:
             skill_loader: SkillLoader 实例
             skill_catalog: SkillCatalog 实例
             shell_tool: ShellTool 实例（用于 git 操作）
+            on_skill_loaded: 技能加载后的回调（用于同步 handler_registry 等）
         """
         self._registry = skill_registry
         self._loader = skill_loader
         self._catalog = skill_catalog
         self._shell_tool = shell_tool
+        self._on_skill_loaded = on_skill_loaded
 
         # 缓存
         self._catalog_text: str = ""
@@ -196,6 +199,8 @@ class SkillManager:
                 loaded = self._loader.load_skill(target_dir)
                 if loaded:
                     self._catalog_text = self._catalog.generate_catalog()
+                    if self._on_skill_loaded:
+                        self._on_skill_loaded()
                     logger.info(f"Skill installed from git: {skill_name}")
             except Exception as e:
                 logger.error(f"Failed to load installed skill: {e}")
@@ -272,6 +277,8 @@ class SkillManager:
                 loaded = self._loader.load_skill(skill_dir)
                 if loaded:
                     self._catalog_text = self._catalog.generate_catalog()
+                    if self._on_skill_loaded:
+                        self._on_skill_loaded()
                     logger.info(f"Skill installed from URL: {skill_name}")
             except Exception as e:
                 logger.error(f"Failed to load installed skill: {e}")
