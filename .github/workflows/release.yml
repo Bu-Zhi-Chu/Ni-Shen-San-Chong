@@ -411,7 +411,10 @@ jobs:
             BUNDLE_DIR="${TARGET_BASE}/release/bundle"
           fi
 
-          mapfile -d '' APPS < <(find "${BUNDLE_DIR}" -type d -name "*.app" -print0)
+          APPS=()
+          while IFS= read -r -d '' app; do
+            APPS+=("${app}")
+          done < <(find "${BUNDLE_DIR}" -type d -name "*.app" -print0)
           if [ "${#APPS[@]}" -eq 0 ]; then
             echo "No .app bundles found under ${BUNDLE_DIR}; skip."
             exit 0
