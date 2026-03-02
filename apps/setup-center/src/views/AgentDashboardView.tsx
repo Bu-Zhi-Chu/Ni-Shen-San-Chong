@@ -43,6 +43,7 @@ type SimNode = TopoNode & {
   deathT: number | null;
   ripples: { t: number; maxR: number }[];
   prevToolsTotal: number;
+  rgb: [number, number, number];
 };
 
 // ── Pulse along an edge ────────────────────────────────────────────
@@ -72,9 +73,14 @@ type Mote = { x: number; y: number; vx: number; vy: number; size: number; alpha:
 
 // ── Helpers ────────────────────────────────────────────────────────
 
+const _rgbCache = new Map<string, [number, number, number]>();
 function hexToRgb(hex: string): [number, number, number] {
+  const cached = _rgbCache.get(hex);
+  if (cached) return cached;
   const h = hex.replace("#", "");
-  return [parseInt(h.substring(0, 2), 16), parseInt(h.substring(2, 4), 16), parseInt(h.substring(4, 6), 16)];
+  const rgb: [number, number, number] = [parseInt(h.substring(0, 2), 16), parseInt(h.substring(2, 4), 16), parseInt(h.substring(4, 6), 16)];
+  _rgbCache.set(hex, rgb);
+  return rgb;
 }
 
 function lerp(a: number, b: number, t: number) {
@@ -148,6 +154,26 @@ function getSvgImage(name: string, color: string): HTMLImageElement | null {
   img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
   _svgImgCache.set(key, img);
   return null;
+}
+
+const _emojiCache = new Map<string, HTMLCanvasElement>();
+function getEmojiCanvas(emoji: string, size: number): HTMLCanvasElement {
+  const key = `${emoji}:${size}`;
+  const cached = _emojiCache.get(key);
+  if (cached) return cached;
+  const res = size * 2;
+  const cvs = document.createElement("canvas");
+  cvs.width = res;
+  cvs.height = res;
+  const c = cvs.getContext("2d");
+  if (c) {
+    c.font = `${size}px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif`;
+    c.textAlign = "center";
+    c.textBaseline = "middle";
+    c.fillText(emoji, res / 2, res / 2 + size * 0.06);
+  }
+  _emojiCache.set(key, cvs);
+  return cvs;
 }
 
 // ── Main component ─────────────────────────────────────────────────
@@ -250,6 +276,7 @@ export function AgentDashboardView({
           ...n,
           targetR: tgtR,
           prevToolsTotal: n.tools_total,
+          rgb: hexToRgb(n.color || "#6b7280"),
         });
         if (n.status === "completed" && !existing.deathT) {
           existing.deathT = now() + 15;
@@ -313,6 +340,7 @@ export function AgentDashboardView({
           deathT: n.status === "completed" ? now() + 15 : null,
           ripples: [],
           prevToolsTotal: n.tools_total,
+          rgb: hexToRgb(n.color || "#6b7280"),
         });
       }
     }
@@ -331,7 +359,7 @@ export function AgentDashboardView({
     const W = sizeRef.current.w;
     const H = sizeRef.current.h;
     if (motesRef.current.length === 0) {
-      for (let i = 0; i < 90; i++) {
+      for (let i = 0; i < 50; i++) {
         motesRef.current.push({
           x: Math.random() * W,
           y: Math.random() * H,
@@ -597,71 +625,79 @@ export function AgentDashboardView({
         ctx.fill();
       }
 
-      // constellation lines between nearby motes
+      // constellation lines between nearby motes (batched by alpha bin)
       ctx.lineWidth = 0.5;
+      const moteBins: [number, number, number, number][][] = [[], [], []];
       for (let i = 0; i < motes.length; i++) {
         for (let j = i + 1; j < motes.length; j++) {
           const dx = motes[i].x - motes[j].x;
           const dy = motes[i].y - motes[j].y;
           const d = Math.sqrt(dx * dx + dy * dy);
-          if (d < 80) {
-            const a = (1 - d / 80) * 0.06;
-            ctx.beginPath();
-            ctx.moveTo(motes[i].x, motes[i].y);
-            ctx.lineTo(motes[j].x, motes[j].y);
-            ctx.strokeStyle = dark ? `rgba(255,255,255,${a})` : `rgba(0,0,0,${a * 0.5})`;
-            ctx.stroke();
+          if (d < 60) {
+            const a = (1 - d / 60) * 0.06;
+            const bin = a > 0.04 ? 2 : a > 0.02 ? 1 : 0;
+            moteBins[bin].push([motes[i].x, motes[i].y, motes[j].x, motes[j].y]);
           }
         }
       }
+      const binAlphas = [0.01, 0.03, 0.05];
+      for (let b = 0; b < 3; b++) {
+        if (moteBins[b].length === 0) continue;
+        ctx.beginPath();
+        for (const [x1, y1, x2, y2] of moteBins[b]) {
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+        }
+        const ba = binAlphas[b];
+        ctx.strokeStyle = dark ? `rgba(255,255,255,${ba})` : `rgba(0,0,0,${ba * 0.5})`;
+        ctx.stroke();
+      }
 
-      // faint connections from dormant nodes to nearby motes
+      // faint connections from dormant nodes to nearby motes (batched per node)
       for (const n of nodes) {
         if (n.status !== "dormant" || n.opacity <= 0) continue;
-        const [cr, cg, cb] = hexToRgb(n.color);
+        const [cr, cg, cb] = n.rgb;
+        ctx.beginPath();
+        let hasLines = false;
         for (const m of motes) {
           const dx = n.x - m.x;
           const dy = n.y - m.y;
           const d = Math.sqrt(dx * dx + dy * dy);
-          if (d < 100) {
-            const a = (1 - d / 100) * 0.06 * n.opacity;
-            ctx.beginPath();
+          if (d < 70) {
             ctx.moveTo(n.x, n.y);
             ctx.lineTo(m.x, m.y);
-            ctx.strokeStyle = `rgba(${cr},${cg},${cb},${a})`;
-            ctx.stroke();
+            hasLines = true;
           }
+        }
+        if (hasLines) {
+          ctx.strokeStyle = `rgba(${cr},${cg},${cb},${0.04 * n.opacity})`;
+          ctx.stroke();
         }
       }
 
       // ── Dormant inter-connections (latent neural web) ──
       const dormantArr = nodes.filter((n) => n.status === "dormant" && n.opacity > 0);
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 8]);
       for (let i = 0; i < dormantArr.length; i++) {
         for (let j = i + 1; j < dormantArr.length; j++) {
           const a = dormantArr[i], b = dormantArr[j];
           const dx = b.x - a.x, dy = b.y - a.y;
           const d = Math.sqrt(dx * dx + dy * dy);
-          if (d > 500) continue;
-          const [ar, ag, ab] = hexToRgb(a.color);
-          const [br, bg, bb] = hexToRgb(b.color);
-          const proximity = 1 - d / 500;
+          if (d > 300) continue;
+          const [ar, ag, ab] = a.rgb;
+          const [br, bg, bb] = b.rgb;
+          const proximity = 1 - d / 300;
           const lineA = proximity * 0.12 * Math.min(a.opacity, b.opacity);
-          const midX = (a.x + b.x) / 2 + Math.sin(t * 0.15 + i) * 20;
-          const midY = (a.y + b.y) / 2 + Math.cos(t * 0.2 + j) * 20;
-          const grad = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
-          grad.addColorStop(0, `rgba(${ar},${ag},${ab},${lineA})`);
-          grad.addColorStop(0.5, `rgba(${(ar + br) >> 1},${(ag + bg) >> 1},${(ab + bb) >> 1},${lineA * 1.5})`);
-          grad.addColorStop(1, `rgba(${br},${bg},${bb},${lineA})`);
+          const mr = (ar + br) >> 1, mg = (ag + bg) >> 1, mb = (ab + bb) >> 1;
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
-          ctx.quadraticCurveTo(midX, midY, b.x, b.y);
-          ctx.strokeStyle = grad;
-          ctx.lineWidth = 1;
-          ctx.setLineDash([5, 8]);
+          ctx.lineTo(b.x, b.y);
+          ctx.strokeStyle = `rgba(${mr},${mg},${mb},${lineA})`;
           ctx.stroke();
-          ctx.setLineDash([]);
         }
       }
+      ctx.setLineDash([]);
 
       // ── Draw edges (synapses) — organic cubic bezier ──
       for (const e of edges) {
@@ -679,8 +715,8 @@ export function AgentDashboardView({
         const cp2x = src.x + dx * 0.7 - perp.x + drift2;
         const cp2y = src.y + dy * 0.7 - perp.y + drift2;
 
-        const [sr, sg, sb] = hexToRgb(src.color);
-        const [dr, dg, db] = hexToRgb(dst.color);
+        const [sr, sg, sb] = src.rgb;
+        const [dr, dg, db] = dst.rgb;
         const isActive = src.status === "running" || dst.status === "running";
         const baseAlpha = isActive ? 0.7 : 0.2;
         const alpha = baseAlpha * Math.min(src.opacity, dst.opacity);
@@ -719,7 +755,7 @@ export function AgentDashboardView({
           return { x: lerp(src.x, dst.x, u), y: lerp(src.y, dst.y, u) };
         };
 
-        const [cr, cg, cb] = hexToRgb(src.color);
+        const [cr, cg, cb] = src.rgb;
         const headAlpha = Math.sin(p.t * Math.PI) * 0.95;
 
         // Trail: draw fading segments behind the head
@@ -758,7 +794,7 @@ export function AgentDashboardView({
       // ── Draw neurons (solid + clear) ──
       for (const n of nodes) {
         if (n.opacity <= 0 || n.r <= 0) continue;
-        const [cr, cg, cb] = hexToRgb(n.color);
+        const [cr, cg, cb] = n.rgb;
         const isRunning = n.status === "running";
         const isDorm = n.status === "dormant";
         const isErr = n.status === "error";
@@ -868,10 +904,9 @@ export function AgentDashboardView({
             }
           } else {
             const emojiSize = Math.round(drawR * (isDorm ? 0.9 : 1.1));
-            ctx.font = `${emojiSize}px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif`;
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillText(n.icon, n.x, n.y + emojiSize * 0.06);
+            const cached = getEmojiCanvas(n.icon, emojiSize);
+            const half = cached.width / 2;
+            ctx.drawImage(cached, n.x - half, n.y - half);
           }
           ctx.restore();
         }
@@ -1149,9 +1184,7 @@ function NeuralStyles() {
         gap: 5px;
         padding: 3px 10px 3px 6px;
         border-radius: 20px;
-        background: rgba(0,0,0,0.25);
-        backdrop-filter: blur(6px);
-        -webkit-backdrop-filter: blur(6px);
+        background: rgba(15,15,25,0.7);
         border: 1px solid rgba(255,255,255,0.06);
         transform-origin: center center;
         margin-left: -40px;
@@ -1161,8 +1194,8 @@ function NeuralStyles() {
       }
       [data-theme="light"] .neural-label,
       :root:not([data-theme="dark"]) .neural-label {
-        background: rgba(255,255,255,0.55);
-        border: 1px solid rgba(0,0,0,0.06);
+        background: rgba(255,255,255,0.75);
+        border: 1px solid rgba(0,0,0,0.08);
       }
       .neural-label.hovered, .neural-label.selected {
         border-color: var(--nc, #7c3aed);
