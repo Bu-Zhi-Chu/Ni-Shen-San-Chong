@@ -280,12 +280,18 @@ jobs:
             BUNDLE_DIR="${TARGET_BASE}/release/bundle"
           fi
 
+          # Only sign top-level .app bundles (under macos/), NOT nested Python.app etc.
+          # The previous `find` without -maxdepth picked up nested Python.app bundles
+          # and re-signed them AFTER the main app was sealed, breaking the seal.
+          MACOS_BUNDLE_DIR="${BUNDLE_DIR}/macos"
           APPS=()
-          while IFS= read -r -d '' app; do
-            APPS+=("${app}")
-          done < <(find "${BUNDLE_DIR}" -type d -name "*.app" -print0)
+          if [ -d "${MACOS_BUNDLE_DIR}" ]; then
+            while IFS= read -r -d '' app; do
+              APPS+=("${app}")
+            done < <(find "${MACOS_BUNDLE_DIR}" -maxdepth 1 -type d -name "*.app" -print0)
+          fi
           if [ "${#APPS[@]}" -eq 0 ]; then
-            echo "No .app bundles found under ${BUNDLE_DIR}; skip."
+            echo "No .app bundles found under ${MACOS_BUNDLE_DIR}; skip."
             exit 0
           fi
 
@@ -297,8 +303,8 @@ jobs:
 
               # Apple code-signing requires strict inside-out order:
               #   innermost executables → containing bundles → framework version binaries
-              # Each layer's signature seals its contents, so inner layers must be
-              # signed before outer layers that reference them.
+              # Each layer's signature seals its contents, so inner layers must
+              # be fully signed before outer layers that reference them.
 
               # 1) Sign executables inside Python.app bundles (deepest level).
               for pybin in \
@@ -333,10 +339,7 @@ jobs:
               done
 
               # 3) Sign framework version main binaries LAST.
-              #    These are the framework's shared libraries; their signatures
-              #    seal over Resources/ (which contains the now-signed Python.app).
-              #    Signing them before Python.app would cause "sealed resource
-              #    is missing or invalid" because Python.app gets re-signed after.
+              #    Their signatures seal Resources/ (including the signed Python.app).
               for fwbin in \
                 "${FRAMEWORK_DIR}/Versions/3.11/Python" \
                 "${FRAMEWORK_DIR}/Versions/Current/Python"; do
@@ -351,9 +354,6 @@ jobs:
                 fi
               done
 
-              # Skip signing Python.framework as a bundle (codesign reports
-              # "bundle format is ambiguous" due to mixed app+framework layout).
-
               rm -f "${SIGNED_REALPATHS_FILE}"
             fi
 
@@ -362,6 +362,29 @@ jobs:
             echo "Verifying app signature (deep): ${app}"
             codesign --verify --deep --strict --verbose=2 "${app}"
           done
+
+          # Recreate DMG from the signed .app.
+          # Tauri creates the DMG during build (step 20) BEFORE our re-signing,
+          # so the DMG contains the original Tauri-signed app without runtime
+          # hardening or timestamps.  We must rebuild it.
+          DMG_DIR="${BUNDLE_DIR}/dmg"
+          if [ -d "${DMG_DIR}" ]; then
+            for dmg_file in "${DMG_DIR}"/*.dmg; do
+              [ -f "${dmg_file}" ] || continue
+              if [ "${#APPS[@]}" -gt 0 ]; then
+                app="${APPS[0]}"
+                app_name="$(basename "${app}" .app)"
+                echo "Recreating DMG from signed app: ${dmg_file}"
+                rm -f "${dmg_file}"
+                hdiutil create \
+                  -volname "${app_name}" \
+                  -srcfolder "${app}" \
+                  -ov -format UDZO \
+                  "${dmg_file}"
+                echo "DMG recreated: ${dmg_file}"
+              fi
+            done
+          fi
 
       - name: Notarize macOS artifacts (manual notarytool)
         if: runner.os == 'macOS' && (github.event_name != 'workflow_dispatch' || inputs.enable_notarization == true || inputs.enable_notarization == 'true')
