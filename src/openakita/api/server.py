@@ -164,8 +164,8 @@ def create_app(
     # CORS configuration (outermost middleware — added last)
     # NOTE: allow_origins=["*"] is incompatible with allow_credentials=True per
     # the browser spec.  When no explicit origins are configured we fall back to
-    # allow_origin_func which echoes the request Origin, achieving the same
-    # permissive behaviour while satisfying the spec.
+    # allow_origin_regex which matches any origin, achieving the same permissive
+    # behaviour while satisfying the spec.
     cors_origins = os.environ.get("CORS_ORIGINS", "").strip()
     cors_kwargs: dict[str, Any] = dict(
         allow_credentials=True,
@@ -175,7 +175,7 @@ def create_app(
     if cors_origins:
         cors_kwargs["allow_origins"] = [o.strip() for o in cors_origins.split(",") if o.strip()]
     else:
-        cors_kwargs["allow_origin_func"] = lambda origin: True
+        cors_kwargs["allow_origin_regex"] = r".*"
     app.add_middleware(CORSMiddleware, **cors_kwargs)
 
     # Store references in app state

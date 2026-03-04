@@ -50,12 +50,24 @@ export function WebPasswordManager({
     }
   };
 
+  const [generatedPw, setGeneratedPw] = useState<string | null>(null);
+
   const doRandomize = async () => {
     const chars = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
     let pw = "";
     for (let i = 0; i < 16; i++) pw += chars[Math.floor(Math.random() * chars.length)];
     await doChangePassword(pw);
+    setGeneratedPw(pw);
+    try { await navigator.clipboard.writeText(pw); } catch { /* clipboard may not be available */ }
     setNotice(t("adv.webPasswordReset", { password: pw }));
+  };
+
+  const copyGenerated = async () => {
+    if (!generatedPw) return;
+    try {
+      await navigator.clipboard.writeText(generatedPw);
+      setNotice(t("adv.webPasswordCopied", { defaultValue: "密码已复制到剪贴板" }));
+    } catch { /* clipboard may not be available */ }
   };
 
   return (
@@ -64,6 +76,15 @@ export function WebPasswordManager({
         <div style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ color: "var(--muted)", minWidth: 80 }}>{t("adv.webPasswordCurrent")}:</span>
           <code style={{ padding: "2px 8px", background: "var(--bg)", borderRadius: 4, fontSize: 13, letterSpacing: 1 }}>{hint}</code>
+        </div>
+      )}
+      {generatedPw && (
+        <div style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: "var(--success-bg, #f0fdf4)", borderRadius: 6, border: "1px solid var(--success-line, #bbf7d0)" }}>
+          <span style={{ color: "var(--success, #16a34a)", fontWeight: 500, whiteSpace: "nowrap" }}>{t("adv.webPasswordGenerated", { defaultValue: "新密码" })}:</span>
+          <code style={{ flex: 1, padding: "2px 6px", background: "var(--bg)", borderRadius: 4, fontSize: 13, letterSpacing: 0.5, userSelect: "all", wordBreak: "break-all" }}>{generatedPw}</code>
+          <button className="btnSmall" onClick={copyGenerated} style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+            {t("common.copy", { defaultValue: "复制" })}
+          </button>
         </div>
       )}
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>

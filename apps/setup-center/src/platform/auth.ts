@@ -6,6 +6,13 @@ import { IS_WEB } from "./detect";
 
 const ACCESS_TOKEN_KEY = "openakita_access_token";
 
+let _localAuthMode = false;
+
+/** Returns true if the backend granted access via local IP exemption (no token needed). */
+export function isLocalAuthMode(): boolean { return _localAuthMode; }
+
+export function setLocalAuthMode(v: boolean): void { _localAuthMode = v; }
+
 // ---------------------------------------------------------------------------
 // Token storage
 // ---------------------------------------------------------------------------
@@ -55,6 +62,8 @@ let _refreshPromise: Promise<string | null> | null = null;
 export const AUTH_EXPIRED_EVENT = "openakita-auth-expired";
 
 export async function refreshAccessToken(apiBase = ""): Promise<string | null> {
+  // Local auth mode: no refresh needed — backend grants access by IP
+  if (_localAuthMode) return null;
   if (_refreshPromise) return _refreshPromise;
 
   _refreshPromise = (async () => {
@@ -96,6 +105,9 @@ export async function authFetch(
   apiBase = "",
 ): Promise<Response> {
   if (!IS_WEB) return fetch(url, init);
+
+  // Local auth mode: backend grants access by IP, no token needed
+  if (_localAuthMode) return fetch(url, init);
 
   let token = getAccessToken();
 
@@ -189,6 +201,9 @@ export function installFetchInterceptor(): void {
 
   const originalFetch = window.fetch.bind(window);
   window.fetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    // Local auth mode: no token injection needed
+    if (_localAuthMode) return originalFetch(input, init);
+
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
     const isSameOrigin = url.startsWith("/") || url.startsWith(window.location.origin);
 
@@ -214,24 +229,35 @@ export function installFetchInterceptor(): void {
 // ---------------------------------------------------------------------------
 
 export async function checkAuth(apiBase = ""): Promise<boolean> {
-  try {
-    const token = getAccessToken();
-    const headers: Record<string, string> = {};
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-    const res = await fetch(`${apiBase}/api/auth/check`, {
-      headers,
-      credentials: "include",
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.authenticated === true) return true;
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const token = getAccessToken();
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch(`${apiBase}/api/auth/check`, {
+        headers,
+        credentials: "include",
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.authenticated === true) {
+          if (data.method === "local") _localAuthMode = true;
+          return true;
+        }
+      }
+      // Access token missing or expired — try silent refresh via httpOnly cookie
+      const refreshed = await refreshAccessToken(apiBase);
+      if (refreshed) return true;
+      return false;
+    } catch {
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, attempt * 1000));
+        continue;
+      }
+      return false;
     }
-    // Access token missing or expired — try silent refresh via httpOnly cookie
-    const refreshed = await refreshAccessToken(apiBase);
-    if (refreshed) return true;
-    return false;
-  } catch {
-    return false;
   }
+  return false;
 }
