@@ -29,7 +29,14 @@ export function LoginView({
     if (result.success) {
       onLoginSuccess();
     } else {
-      setError(result.error || t("login.failed"));
+      const raw = (result.error || "").toLowerCase();
+      if (raw.includes("abort") || raw.includes("timeout")) {
+        setError(t("login.failedTimeout", { defaultValue: "连接超时，请检查网络后重试" }));
+      } else if (raw.includes("failed to fetch") || raw.includes("networkerror") || raw.includes("fetch failed")) {
+        setError(t("login.failedNetwork", { defaultValue: "无法连接服务器，请检查地址和网络" }));
+      } else {
+        setError(result.error || t("login.failed"));
+      }
     }
   }, [password, apiBaseUrl, onLoginSuccess, t]);
 

@@ -100,21 +100,20 @@ export function TokenStatsView({
     setFetchError(false);
     try {
       const base = `${apiBaseUrl}/api/stats/tokens`;
-      const [totalRes, epRes, opRes, tlRes, sessRes] = await Promise.all([
-        fetch(`${base}/total?period=${period}`, { signal: AbortSignal.timeout(5000) }),
-        fetch(`${base}/summary?period=${period}&group_by=endpoint_name`, { signal: AbortSignal.timeout(5000) }),
-        fetch(`${base}/summary?period=${period}&group_by=operation_type`, { signal: AbortSignal.timeout(5000) }),
-        fetch(`${base}/timeline?period=${period}&interval=${period === "1d" ? "hour" : "day"}`, { signal: AbortSignal.timeout(5000) }),
-        fetch(`${base}/sessions?period=${period}&limit=20`, { signal: AbortSignal.timeout(5000) }),
+      const results = await Promise.allSettled([
+        fetch(`${base}/total?period=${period}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()),
+        fetch(`${base}/summary?period=${period}&group_by=endpoint_name`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()),
+        fetch(`${base}/summary?period=${period}&group_by=operation_type`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()),
+        fetch(`${base}/timeline?period=${period}&interval=${period === "1d" ? "hour" : "day"}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()),
+        fetch(`${base}/sessions?period=${period}&limit=20`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()),
       ]);
-      const [totalJ, epJ, opJ, tlJ, sessJ] = await Promise.all([
-        totalRes.json(), epRes.json(), opRes.json(), tlRes.json(), sessRes.json(),
-      ]);
-      setTotal(totalJ.data || null);
-      setByEndpoint(epJ.data || []);
-      setByOp(opJ.data || []);
-      setTimeline(tlJ.data || []);
-      setSessions(sessJ.data || []);
+      const val = (i: number) => results[i].status === "fulfilled" ? (results[i] as PromiseFulfilledResult<any>).value : null;
+      setTotal(val(0)?.data || null);
+      setByEndpoint(val(1)?.data || []);
+      setByOp(val(2)?.data || []);
+      setTimeline(val(3)?.data || []);
+      setSessions(val(4)?.data || []);
+      if (results.every(r => r.status === "rejected")) setFetchError(true);
     } catch {
       setFetchError(true);
     } finally {
