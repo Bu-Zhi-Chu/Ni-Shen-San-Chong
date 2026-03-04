@@ -148,43 +148,43 @@ jobs:
             bundles: "nsis"
             args: ""
             build_mode: "core"
-            suffix: "-core"
+            suffix: "windows-x64-core"
           # Linux Ubuntu 22.04
           - platform: ubuntu-22.04
             bundles: "deb"
             args: ""
             build_mode: "core"
-            suffix: "-ubuntu22-amd64"
+            suffix: "ubuntu22-amd64"
           - platform: ubuntu-22.04-arm
             bundles: "deb"
             args: ""
             build_mode: "core"
-            suffix: "-ubuntu22-arm64"
+            suffix: "ubuntu22-arm64"
           # Linux Ubuntu 24.04
           - platform: ubuntu-24.04
             bundles: "deb"
             args: ""
             build_mode: "core"
-            suffix: "-ubuntu24-amd64"
+            suffix: "ubuntu24-amd64"
           - platform: ubuntu-24.04-arm
             bundles: "deb"
             args: ""
             build_mode: "core"
-            suffix: "-ubuntu24-arm64"
+            suffix: "ubuntu24-arm64"
           # macOS - Apple Silicon (arm64)
           - platform: macos-latest
             bundles: "app,dmg"
             args: "--target aarch64-apple-darwin"
             rust_target: "aarch64-apple-darwin"
             build_mode: "core"
-            suffix: "-macos-arm64"
+            suffix: "macos-arm64"
           # macOS - Intel (x86_64)
           - platform: macos-15-intel
             bundles: "app,dmg"
             args: "--target x86_64-apple-darwin"
             rust_target: "x86_64-apple-darwin"
             build_mode: "core"
-            suffix: "-macos-x64"
+            suffix: "macos-x64"
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -758,13 +758,14 @@ jobs:
             local f="$1"
             local base
             base="$(basename "$f")"
-            # 统一文件名：把空格换成点，避免 Release 里出现重复/难找的资产名
             local norm="${base// /.}"
-            # 在扩展名前插入构建模式后缀（如 -core, -full）
             if [ -n "${SUFFIX}" ]; then
               local ext="${norm##*.}"
-              local name="${norm%.*}"
-              norm="${name}${SUFFIX}.${ext}"
+              local name_no_ext="${norm%.*}"
+              # 去掉 Tauri 自动生成的架构前缀（最后一个 _ 之后的部分），
+              # 替换为统一的平台标识符，如 windows-x64-core、macos-arm64
+              local base_name="${name_no_ext%_*}"
+              norm="${base_name}_${SUFFIX}.${ext}"
             fi
             cp -f "$f" "${OUT_DIR}/${norm}"
           }
