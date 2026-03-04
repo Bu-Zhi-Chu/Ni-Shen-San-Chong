@@ -1736,6 +1736,7 @@ fn main() {
         ))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // ── NSIS 安装后以当前用户执行清理（解决“以管理员运行安装程序”时清错目录的问题） ──
             let args: Vec<String> = std::env::args().collect();
@@ -4301,30 +4302,33 @@ fn open_file_with_default(path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Export the workspace .env file to Downloads as a timestamped backup.
+/// Export the workspace .env file. If `dest_path` is given (from a save dialog),
+/// write there; otherwise fall back to Downloads with a timestamped name.
 #[tauri::command]
-fn export_env_backup(workspace_id: String) -> Result<String, String> {
+fn export_env_backup(workspace_id: String, dest_path: Option<String>) -> Result<String, String> {
     let env_path = workspace_dir(&workspace_id).join(".env");
     if !env_path.exists() {
         return Err("No .env file found in workspace".to_string());
     }
 
-    let downloads_dir = dirs_next::download_dir()
-        .or_else(|| dirs_next::home_dir().map(|h| h.join("Downloads")))
-        .ok_or_else(|| "Cannot determine Downloads directory".to_string())?;
-    fs::create_dir_all(&downloads_dir)
-        .map_err(|e| format!("Cannot create Downloads dir: {e}"))?;
+    let dest = if let Some(p) = dest_path {
+        PathBuf::from(p)
+    } else {
+        let downloads_dir = dirs_next::download_dir()
+            .or_else(|| dirs_next::home_dir().map(|h| h.join("Downloads")))
+            .ok_or_else(|| "Cannot determine Downloads directory".to_string())?;
+        fs::create_dir_all(&downloads_dir)
+            .map_err(|e| format!("Cannot create Downloads dir: {e}"))?;
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        downloads_dir.join(format!("openakita-env-backup-{ts}.env"))
+    };
 
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let filename = format!("openakita-env-backup-{ts}.env");
-    let mut dest = downloads_dir.join(&filename);
-    let mut counter = 1u32;
-    while dest.exists() {
-        dest = downloads_dir.join(format!("openakita-env-backup-{ts} ({counter}).env"));
-        counter += 1;
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Cannot create directory: {e}"))?;
     }
 
     fs::copy(&env_path, &dest)
@@ -4333,32 +4337,36 @@ fn export_env_backup(workspace_id: String) -> Result<String, String> {
     Ok(dest.to_string_lossy().to_string())
 }
 
-/// Export diagnostic bundle (logs, llm_debug, system info) as a zip in Downloads.
+/// Export diagnostic bundle (logs, llm_debug, system info) as a zip.
+/// If `dest_path` is given (from a save dialog), write there; otherwise fall back to Downloads.
 #[tauri::command]
 fn export_diagnostic_bundle(
     workspace_id: String,
     system_info_json: Option<String>,
+    dest_path: Option<String>,
 ) -> Result<String, String> {
     let ws_dir = workspace_dir(&workspace_id);
     let logs_dir = ws_dir.join("logs");
     let llm_debug_dir = ws_dir.join("data").join("llm_debug");
 
-    let downloads_dir = dirs_next::download_dir()
-        .or_else(|| dirs_next::home_dir().map(|h| h.join("Downloads")))
-        .ok_or_else(|| "Cannot determine Downloads directory".to_string())?;
-    fs::create_dir_all(&downloads_dir)
-        .map_err(|e| format!("Cannot create Downloads dir: {e}"))?;
+    let dest = if let Some(p) = dest_path {
+        PathBuf::from(p)
+    } else {
+        let downloads_dir = dirs_next::download_dir()
+            .or_else(|| dirs_next::home_dir().map(|h| h.join("Downloads")))
+            .ok_or_else(|| "Cannot determine Downloads directory".to_string())?;
+        fs::create_dir_all(&downloads_dir)
+            .map_err(|e| format!("Cannot create Downloads dir: {e}"))?;
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        downloads_dir.join(format!("openakita-diagnostic-{ts}.zip"))
+    };
 
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let zip_name = format!("openakita-diagnostic-{ts}.zip");
-    let mut dest = downloads_dir.join(&zip_name);
-    let mut counter = 1u32;
-    while dest.exists() {
-        dest = downloads_dir.join(format!("openakita-diagnostic-{ts} ({counter}).zip"));
-        counter += 1;
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Cannot create directory: {e}"))?;
     }
 
     let file = fs::File::create(&dest)

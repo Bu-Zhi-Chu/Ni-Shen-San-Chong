@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { check as checkUpdate, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { save as showSaveDialog } from "@tauri-apps/plugin-dialog";
 // Window controls are handled by native title bar
 import { ChatView } from "./views/ChatView";
 import { SkillManager } from "./views/SkillManager";
@@ -6640,9 +6641,20 @@ export function App() {
 
     async function opsHandleEnvExport() {
       if (!currentWorkspaceId) return;
-      setBusy(t("adv.opsEnvExport"));
       try {
-        const dest = await invoke<string>("export_env_backup", { workspaceId: currentWorkspaceId });
+        const ts = Math.floor(Date.now() / 1000);
+        const filename = `openakita-env-backup-${ts}.env`;
+        const defaultDir = info?.homeDir ? joinPath(info.homeDir, "Downloads") : undefined;
+        const chosen = await showSaveDialog({
+          defaultPath: defaultDir ? joinPath(defaultDir, filename) : filename,
+          filters: [{ name: "Environment", extensions: ["env"] }],
+        });
+        if (!chosen) return;
+        setBusy(t("adv.opsEnvExport"));
+        const dest = await invoke<string>("export_env_backup", {
+          workspaceId: currentWorkspaceId,
+          destPath: chosen,
+        });
         setNotice(t("adv.opsEnvExportSuccess", { path: dest }));
         await invoke("show_item_in_folder", { path: dest });
       } catch (e) { setError(String(e)); } finally { setBusy(null); }
@@ -6672,8 +6684,16 @@ export function App() {
 
     async function opsHandleBundleExport() {
       if (!currentWorkspaceId) return;
-      setBusy(t("adv.opsLogExporting"));
       try {
+        const ts = Math.floor(Date.now() / 1000);
+        const filename = `openakita-diagnostic-${ts}.zip`;
+        const defaultDir = info?.homeDir ? joinPath(info.homeDir, "Downloads") : undefined;
+        const chosen = await showSaveDialog({
+          defaultPath: defaultDir ? joinPath(defaultDir, filename) : filename,
+          filters: [{ name: "ZIP Archive", extensions: ["zip"] }],
+        });
+        if (!chosen) return;
+        setBusy(t("adv.opsLogExporting"));
         let sysInfoJson: string | undefined;
         if (shouldUseHttpApi()) {
           try {
@@ -6685,6 +6705,7 @@ export function App() {
         const dest = await invoke<string>("export_diagnostic_bundle", {
           workspaceId: currentWorkspaceId,
           systemInfoJson: sysInfoJson ?? null,
+          destPath: chosen,
         });
         setNotice(t("adv.opsLogExportSuccess", { path: dest }));
         await invoke("show_item_in_folder", { path: dest });
