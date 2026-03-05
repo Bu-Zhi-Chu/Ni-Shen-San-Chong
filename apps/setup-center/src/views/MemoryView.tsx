@@ -90,6 +90,7 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
   const [reviewing, setReviewing] = useState(false);
   const [reviewResult, setReviewResult] = useState<ReviewResult | null>(null);
   const [error, setError] = useState("");
+  const [showReviewConfirm, setShowReviewConfirm] = useState(false);
 
   const loadMemories = useCallback(async () => {
     if (!serviceRunning) return;
@@ -174,13 +175,18 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
     setEditScore(m.importance_score);
   };
 
+  const handleReviewConfirm = () => setShowReviewConfirm(true);
+
   const handleReview = async () => {
-    if (!confirm("启动 LLM 智能审查？将由大模型逐条审查所有记忆，删除垃圾、合并重复。")) return;
+    setShowReviewConfirm(false);
     setReviewing(true);
     setReviewResult(null);
     setError("");
     try {
-      const res = await safeFetch(`${API_BASE}/api/memories/review`, { method: "POST" });
+      const res = await safeFetch(`${API_BASE}/api/memories/review`, {
+        method: "POST",
+        signal: AbortSignal.timeout(180_000),
+      });
       const data = await res.json();
       setReviewResult(data.review);
       await loadMemories();
@@ -299,7 +305,7 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
           )}
 
           <button
-            onClick={handleReview}
+            onClick={handleReviewConfirm}
             disabled={reviewing}
             style={{
               display: "flex", alignItems: "center", gap: 4, padding: "6px 12px",
@@ -314,6 +320,56 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
           </button>
         </div>
       </div>
+
+      {/* Review confirm modal */}
+      {showReviewConfirm && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 9999,
+            background: "rgba(0,0,0,0.45)", display: "flex",
+            alignItems: "center", justifyContent: "center",
+          }}
+          onClick={() => setShowReviewConfirm(false)}
+        >
+          <div
+            style={{
+              background: "var(--card, #fff)", borderRadius: 12,
+              padding: "24px 28px", maxWidth: 400, width: "90%",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text)", marginBottom: 10 }}>
+              启动 LLM 智能审查
+            </div>
+            <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6, marginBottom: 20 }}>
+              将由大模型逐条审查所有记忆，删除垃圾、合并重复。此操作可能需要较长时间，请耐心等待。
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button
+                onClick={() => setShowReviewConfirm(false)}
+                style={{
+                  padding: "6px 16px", borderRadius: 6, fontSize: 13,
+                  border: "1px solid var(--line)", background: "var(--bg)",
+                  color: "var(--text)", cursor: "pointer",
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleReview}
+                style={{
+                  padding: "6px 16px", borderRadius: 6, fontSize: 13,
+                  border: "none", cursor: "pointer", fontWeight: 500,
+                  background: "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff",
+                }}
+              >
+                确认审查
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Review result toast */}
       {reviewResult && (
