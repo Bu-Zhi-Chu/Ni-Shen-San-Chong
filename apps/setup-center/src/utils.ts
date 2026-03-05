@@ -1,6 +1,20 @@
 // ─── Shared utility functions for Setup Center ───
 
+import { confirm as tauriConfirm } from "@tauri-apps/plugin-dialog";
 import type { EnvMap } from "./types";
+
+/**
+ * Cross-platform confirm dialog.
+ * Uses Tauri's native dialog plugin in desktop runtime (proper blocking on
+ * both Windows WebView2 and macOS WKWebView), falls back to `window.confirm()`
+ * in browser dev mode.
+ */
+export async function askConfirm(message: string): Promise<boolean> {
+  if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+    return tauriConfirm(message, { title: "OpenAkita", kind: "info" });
+  }
+  return window.confirm(message);
+}
 
 export function slugify(input: string) {
   return input

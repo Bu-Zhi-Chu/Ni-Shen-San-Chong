@@ -5,6 +5,7 @@ import {
   IconPlay, IconClock, IconCalendar, IconSearch,
   DotGreen, DotGray, DotYellow, DotRed,
 } from "../icons";
+import { askConfirm } from "../utils";
 
 type ScheduledTask = {
   id: string;
@@ -380,7 +381,7 @@ export function SchedulerView({ serviceRunning }: { serviceRunning: boolean }) {
   };
 
   const deleteTask = async (task: ScheduledTask) => {
-    if (!confirm(t("scheduler.confirmDelete", { name: task.name }))) return;
+    if (!(await askConfirm(t("scheduler.confirmDelete", { name: task.name })))) return;
     setBusy(true);
     try {
       const res = await fetch(`${API_BASE}/api/scheduler/tasks/${task.id}`, { method: "DELETE" });

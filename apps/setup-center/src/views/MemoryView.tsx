@@ -3,6 +3,7 @@ import {
   IconRefresh, IconTrash, IconEdit, IconCheck, IconX,
   IconSearch, IconBrain, IconLoader,
 } from "../icons";
+import { askConfirm } from "../utils";
 
 type MemoryItem = {
   id: string;
@@ -134,7 +135,7 @@ export function MemoryView({ serviceRunning }: Props) {
 
   const handleBatchDelete = async () => {
     if (selected.size === 0) return;
-    if (!confirm(`确定删除选中的 ${selected.size} 条记忆？`)) return;
+    if (!(await askConfirm(`确定删除选中的 ${selected.size} 条记忆？`))) return;
     try {
       const res = await fetch(`${API_BASE}/api/memories/batch-delete`, {
         method: "POST",
@@ -176,7 +177,7 @@ export function MemoryView({ serviceRunning }: Props) {
   };
 
   const handleReview = async () => {
-    if (!confirm("启动 LLM 智能审查？将由大模型逐条审查所有记忆，删除垃圾、合并重复。")) return;
+    if (!(await askConfirm("启动 LLM 智能审查？将由大模型逐条审查所有记忆，删除垃圾、合并重复。"))) return;
     setReviewing(true);
     setReviewResult(null);
     setError("");
@@ -184,11 +185,16 @@ export function MemoryView({ serviceRunning }: Props) {
       const res = await fetch(`${API_BASE}/api/memories/review`, { method: "POST" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      setReviewResult(data.review);
-      await loadMemories();
-      await loadStats();
+      const review: ReviewResult = data?.review ?? data;
+      if (review && typeof review.deleted === "number") {
+        setReviewResult(review);
+        loadMemories();
+        loadStats();
+      } else {
+        setError("审查完成，但返回数据格式异常");
+      }
     } catch (e: any) {
-      setError(e.message);
+      setError(e.message || "审查请求失败");
     } finally {
       setReviewing(false);
     }

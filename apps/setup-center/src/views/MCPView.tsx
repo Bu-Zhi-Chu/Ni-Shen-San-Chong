@@ -4,6 +4,7 @@ import {
   IconChevronDown, IconChevronRight, IconInfo,
   DotGreen, DotGray, DotYellow,
 } from "../icons";
+import { askConfirm } from "../utils";
 
 type MCPTool = {
   name: string;
@@ -117,7 +118,7 @@ export function MCPView({ serviceRunning }: { serviceRunning: boolean }) {
   };
 
   const removeServer = async (name: string) => {
-    if (!confirm(`确定删除 MCP 服务器 "${name}"？`)) return;
+    if (!(await askConfirm(`确定删除 MCP 服务器 "${name}"？`))) return;
     setBusy(name);
     try {
       const res = await fetch(`${API_BASE}/api/mcp/servers/${encodeURIComponent(name)}`, { method: "DELETE" });
