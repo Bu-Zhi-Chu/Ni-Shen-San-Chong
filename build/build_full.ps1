@@ -12,9 +12,9 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  OpenAkita Full Package Build" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 
-# Step 1: Package Python backend (full mode)
-Write-Host "`n[1/4] Packaging Python backend (full mode)..." -ForegroundColor Yellow
-python "$ScriptDir\build_backend.py" --mode full
+# Step 1: Package Python backend
+Write-Host "`n[1/4] Packaging Python backend..." -ForegroundColor Yellow
+python "$ScriptDir\build_backend.py"
 if ($LASTEXITCODE -ne 0) { throw "Python backend packaging failed" }
 
 # Step 2: Pre-bundle optional modules
@@ -45,7 +45,7 @@ Push-Location $SetupCenterDir
 try {
     # Full package needs additional modules resource directory
     $env:TAURI_CONFIG = '{"bundle":{"resources":["resources/openakita-server/","resources/modules/"]}}'
-    npx tauri build
+    npm run tauri build
     if ($LASTEXITCODE -ne 0) { throw "Tauri build failed" }
 } finally {
     $env:TAURI_CONFIG = $null

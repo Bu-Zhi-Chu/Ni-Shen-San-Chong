@@ -12,9 +12,9 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  OpenAkita Core Package Build" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 
-# Step 1: Package Python backend (core mode)
-Write-Host "`n[1/3] Packaging Python backend (core mode)..." -ForegroundColor Yellow
-python "$ScriptDir\build_backend.py" --mode core
+# Step 1: Package Python backend
+Write-Host "`n[1/3] Packaging Python backend..." -ForegroundColor Yellow
+python "$ScriptDir\build_backend.py"
 if ($LASTEXITCODE -ne 0) { throw "Python backend packaging failed" }
 
 # Step 2: Copy package result to Tauri resources

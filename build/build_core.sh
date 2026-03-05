@@ -13,10 +13,10 @@ echo "============================================"
 echo "  OpenAkita Core Package Build"
 echo "============================================"
 
-# Step 1: Package Python backend (core mode)
+# Step 1: Package Python backend
 echo ""
-echo "[1/3] Packaging Python backend (core mode)..."
-python3 "$SCRIPT_DIR/build_backend.py" --mode core
+echo "[1/3] Packaging Python backend..."
+python3 "$SCRIPT_DIR/build_backend.py"
 
 # Step 2: Copy package result to Tauri resources
 echo ""

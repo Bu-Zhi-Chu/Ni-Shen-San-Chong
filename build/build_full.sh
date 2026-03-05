@@ -13,10 +13,10 @@ echo "============================================"
 echo "  OpenAkita Full Package Build"
 echo "============================================"
 
-# Step 1: Package Python backend (full mode)
+# Step 1: Package Python backend
 echo ""
-echo "[1/4] Packaging Python backend (full mode)..."
-python3 "$SCRIPT_DIR/build_backend.py" --mode full
+echo "[1/4] Packaging Python backend..."
+python3 "$SCRIPT_DIR/build_backend.py"
 
 # Step 2: Pre-bundle optional modules
 echo ""

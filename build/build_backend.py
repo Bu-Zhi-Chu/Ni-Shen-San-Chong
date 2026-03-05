@@ -3,8 +3,7 @@
 OpenAkita Python Backend Build Script
 
 Usage:
-  python build/build_backend.py --mode core    # Core package (~100-150MB)
-  python build/build_backend.py --mode full    # Full package (~600-800MB)
+  python build/build_backend.py
 """
 
 import argparse
@@ -325,10 +324,10 @@ def ensure_playwright_chromium():
         run_cmd([sys.executable, "-m", "playwright", "install", "chromium"])
 
 
-def build_backend(mode: str):
+def build_backend():
     """Execute PyInstaller packaging"""
     print(f"\n{'='*60}")
-    print(f"  OpenAkita Backend Build - Mode: {mode.upper()}")
+    print(f"  OpenAkita Backend Build")
     print(f"{'='*60}\n")
 
     print("[1/5] Checking dependencies...")
@@ -341,8 +340,6 @@ def build_backend(mode: str):
     clean_dist()
 
     print("\n[4/5] Running PyInstaller...")
-    env = {"OPENAKITA_BUILD_MODE": mode}
-    
     run_cmd(
         [
             sys.executable, "-m", "PyInstaller",
@@ -350,13 +347,12 @@ def build_backend(mode: str):
             "--distpath", str(DIST_DIR),
             "--workpath", str(PROJECT_ROOT / "build" / "pyinstaller_work"),
             "--noconfirm",
-            "--clean",  # Force clean build to avoid symlink conflicts on macOS
+            "--clean",
         ],
-        env=env,
     )
 
     print("\n[5/5] Verifying build output...")
-    
+
     if sys.platform == "win32":
         exe_path = OUTPUT_DIR / "openakita-server.exe"
     else:
@@ -366,7 +362,6 @@ def build_backend(mode: str):
         print(f"  [ERROR] Executable not found: {exe_path}")
         sys.exit(1)
 
-    # Test executable
     try:
         result = subprocess.run(
             [str(exe_path), "--help"],
@@ -389,13 +384,11 @@ def build_backend(mode: str):
     ensure_bundled_pth_file(OUTPUT_DIR)
     verify_bundled_python_contract(OUTPUT_DIR)
 
-    # Calculate size
     total_size = sum(f.stat().st_size for f in OUTPUT_DIR.rglob("*") if f.is_file())
     size_mb = total_size / (1024 * 1024)
     print(f"\n  Build completed!")
     print(f"  Output directory: {OUTPUT_DIR}")
     print(f"  Total size: {size_mb:.1f} MB")
-    print(f"  Mode: {mode.upper()}")
 
 
 def main():
@@ -404,10 +397,10 @@ def main():
         "--mode",
         choices=["core", "full"],
         default="core",
-        help="Build mode: core=minimal(exclude heavy deps), full=complete(all deps)",
+        help="(deprecated, ignored) Build mode — now always builds the same package.",
     )
-    args = parser.parse_args()
-    build_backend(args.mode)
+    parser.parse_args()
+    build_backend()
 
 
 if __name__ == "__main__":

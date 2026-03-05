@@ -177,7 +177,7 @@ The easiest way — download, drop in an API Key, click, done:
 ### Option 2: pip Install
 
 ```bash
-pip install openakita[all]    # Install (with all optional features)
+pip install openakita[all]    # Install with all optional features (IM channels + desktop automation)
 openakita init                # Run setup wizard
 openakita                     # Launch interactive CLI
 ```
