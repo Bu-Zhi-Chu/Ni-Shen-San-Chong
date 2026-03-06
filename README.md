@@ -17,13 +17,13 @@
 </p>
 
 <p align="center">
-  Multi-Agent Collaboration · 30+ LLMs · 6 IM Platforms · 89+ Tools · GUI Setup, Zero Command Line
+  Multi-Agent Collaboration · 30+ LLMs · 6 IM Platforms · 89+ Tools · Desktop / Web / Mobile
 </p>
 
 <p align="center">
   <a href="#core-capabilities">Capabilities</a> •
   <a href="#5-minute-setup">5-Min Setup</a> •
-  <a href="#desktop-app">Desktop App</a> •
+  <a href="#multi-platform-access">Multi-Platform</a> •
   <a href="#multi-agent-collaboration">Multi-Agent</a> •
   <a href="#documentation">Docs</a>
 </p>
@@ -102,7 +102,7 @@ Three-layer memory system + AI extraction. Remembers your preferences, habits, a
 | 🔍 | **Deep Thinking** | Controllable thinking mode, real-time chain-of-thought display, IM streaming |
 | 🛡️ | **Runtime Supervision** | Tool thrashing detection, resource budgets, policy engine, deterministic validators |
 | 🔒 | **Safety & Governance** | POLICIES.yaml, dangerous ops require confirmation, local data storage |
-| 🖥️ | **Desktop App** | Tauri 2.x cross-platform, 11 panels, dark theme, auto-update |
+| 🖥️ | **Multi-Platform** | Desktop (Win/Mac/Linux) · Web (PC & mobile browser) · Mobile App (Android/iOS), 11 panels, dark theme |
 | 📊 | **Observability** | 12 trace span types, full-chain token statistics panel |
 | 😄 | **Stickers** | 5700+ stickers, mood-aware, persona-matched |
 
@@ -162,7 +162,17 @@ openakita status                       # Check status
 
 ---
 
-## Desktop App
+## Multi-Platform Access
+
+OpenAkita supports **Desktop, Web, and Mobile** — use it anywhere, on any device:
+
+| Platform | Details |
+|----------|---------|
+| 🖥️ **Desktop App** | Windows / macOS / Linux — native app built with Tauri 2.x |
+| 🌐 **Web Access** | PC & mobile browser — enable remote access, open in any browser |
+| 📱 **Mobile App** | Android (APK) / iOS (TestFlight) — native wrapper via Capacitor |
+
+### Desktop App
 
 <p align="center">
   <img src="docs/assets/desktop_terminal_en.png" alt="OpenAkita Desktop App" width="800" />
@@ -185,6 +195,21 @@ Cross-platform desktop app built with **Tauri 2.x + React + TypeScript**:
 | **Feedback** | Bug reports + feature requests |
 
 Dark/light theme · Onboarding wizard · Auto-update · Bilingual (EN/CN) · Start on boot
+
+### Mobile App
+
+<p align="center">
+  <a href="https://b23.tv/pWki3Vw">
+    <img src="docs/assets/multi_agent_demo_cover.png" alt="▶ Watch Mobile App Demo" width="720" />
+  </a>
+  <br/>
+  <sub>▶ Click to watch the Mobile App demo on Bilibili</sub>
+</p>
+
+- Connect your phone to the desktop backend over local network
+- Full-featured: chat, multi-Agent collaboration, memory, skills, MCP — all on mobile
+- Supports real-time streaming and Thinking chain display
+- Preview mode available without connecting to a server
 
 ---
 
