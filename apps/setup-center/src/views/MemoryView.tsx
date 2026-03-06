@@ -201,11 +201,16 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
         signal: AbortSignal.timeout(180_000),
       });
       const data = await res.json();
-      setReviewResult(data.review);
-      await loadMemories();
-      await loadStats();
+      const review: ReviewResult = data?.review ?? data;
+      if (review && typeof review.deleted === "number") {
+        setReviewResult(review);
+        loadMemories();
+        loadStats();
+      } else {
+        setError("审查完成，但返回数据格式异常");
+      }
     } catch (e: any) {
-      setError(e.message);
+      setError(e.message || "审查请求失败");
     } finally {
       setReviewing(false);
     }
