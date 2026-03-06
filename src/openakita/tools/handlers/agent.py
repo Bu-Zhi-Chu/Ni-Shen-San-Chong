@@ -468,12 +468,25 @@ class AgentToolHandler:
 
     def _get_orchestrator(self):
         try:
-            from ...main import _orchestrator
-            if _orchestrator is None:
-                logger.warning("[AgentToolHandler] _orchestrator is None in main module")
-            return _orchestrator
+            import openakita.main as _main_mod
+            orch = _main_mod._orchestrator
+            if orch is None:
+                from ...config import settings
+                if settings.multi_agent_enabled:
+                    from openakita.agents.orchestrator import AgentOrchestrator
+                    orch = AgentOrchestrator()
+                    gw = _main_mod._message_gateway
+                    if gw:
+                        orch.set_gateway(gw)
+                    _main_mod._orchestrator = orch
+                    logger.warning(
+                        "[AgentToolHandler] Orchestrator was None — lazily created as fallback"
+                    )
+                else:
+                    logger.warning("[AgentToolHandler] _orchestrator is None (multi_agent disabled)")
+            return orch
         except (ImportError, AttributeError) as e:
-            logger.warning(f"[AgentToolHandler] Cannot import _orchestrator: {e}")
+            logger.warning(f"[AgentToolHandler] Cannot access _orchestrator: {e}")
             return None
 
     def _get_profile_store(self):

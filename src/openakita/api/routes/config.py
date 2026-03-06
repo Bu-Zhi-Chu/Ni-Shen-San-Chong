@@ -344,6 +344,36 @@ async def read_agent_mode():
     return {"multi_agent_enabled": settings.multi_agent_enabled}
 
 
+def _hot_patch_agent_tools(request: Request, *, enable: bool) -> None:
+    """Dynamically register / unregister multi-agent tools on the live global Agent."""
+    agent = getattr(request.app.state, "agent", None)
+    if agent is None:
+        return
+    try:
+        from openakita.tools.definitions.agent import AGENT_TOOLS
+        from openakita.tools.handlers.agent import create_handler as create_agent_handler
+        tool_names = [t["name"] for t in AGENT_TOOLS]
+
+        if enable:
+            existing = {t["name"] for t in agent._tools}
+            for t in AGENT_TOOLS:
+                if t["name"] not in existing:
+                    agent._tools.append(t)
+                agent.tool_catalog.add_tool(t)
+            agent.handler_registry.register(
+                "agent", create_agent_handler(agent), tool_names,
+            )
+            logger.info("[Config API] Agent tools hot-patched onto global agent")
+        else:
+            agent._tools = [t for t in agent._tools if t["name"] not in set(tool_names)]
+            for name in tool_names:
+                agent.tool_catalog.remove_tool(name)
+            agent.handler_registry.unregister("agent")
+            logger.info("[Config API] Agent tools removed from global agent")
+    except Exception as e:
+        logger.warning(f"[Config API] Failed to hot-patch agent tools: {e}")
+
+
 @router.post("/api/config/agent-mode")
 async def write_agent_mode(body: AgentModeRequest, request: Request):
     """切换多Agent模式（Beta）。修改立即生效并持久化。"""
@@ -371,6 +401,16 @@ async def write_agent_mode(body: AgentModeRequest, request: Request):
             ensure_presets_on_mode_enable(settings.data_dir / "agents")
         except Exception as e:
             logger.warning(f"[Config API] Failed to deploy presets: {e}")
+
+        _hot_patch_agent_tools(request, enable=True)
+
+    elif not body.enabled and old:
+        _hot_patch_agent_tools(request, enable=False)
+
+    # 通知 pool 刷新版本号，旧会话的 Agent 下次请求时自动重建
+    pool = getattr(request.app.state, "agent_pool", None)
+    if pool is not None:
+        pool.notify_skills_changed()
 
     return {"status": "ok", "multi_agent_enabled": body.enabled}
 
