@@ -16,7 +16,6 @@ import os
 
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
 from ..auth import (
     REFRESH_COOKIE_NAME,
@@ -30,13 +29,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
-class LoginRequest(BaseModel):
-    password: str
-
-
-class ChangePasswordRequest(BaseModel):
-    new_password: str
-    current_password: str | None = None
+async def _parse_body(request: Request) -> dict:
+    """Parse request body as JSON or form-urlencoded (for CORS-preflight-free mobile requests)."""
+    ct = request.headers.get("content-type", "")
+    if "json" in ct:
+        return await request.json()
+    if "form" in ct or "urlencoded" in ct:
+        form = await request.form()
+        return dict(form)
+    # fallback: try JSON
+    try:
+        return await request.json()
+    except Exception:
+        return {}
 
 
 def _set_refresh_cookie(response: Response, token: str) -> None:
@@ -74,7 +79,7 @@ def _is_local_from_real_ip(request: Request) -> bool:
 # ── POST /api/auth/login ──
 
 @router.post("/login")
-async def login(body: LoginRequest, request: Request, response: Response):
+async def login(request: Request, response: Response):
     config = _get_config(request)
     trust_proxy = os.environ.get("TRUST_PROXY", "").lower() in ("1", "true", "yes")
     client_ip = get_client_ip(request, trust_proxy=trust_proxy)
@@ -85,7 +90,10 @@ async def login(body: LoginRequest, request: Request, response: Response):
             content={"detail": "Too many login attempts, please try again later"},
         )
 
-    if not config.verify_password(body.password):
+    body = await _parse_body(request)
+    password = body.get("password", "")
+
+    if not config.verify_password(password):
         logger.warning("Failed login attempt from %s", client_ip)
         return JSONResponse(
             status_code=401,
@@ -172,7 +180,7 @@ async def check_auth(request: Request):
 # ── POST /api/auth/change-password (local only) ──
 
 @router.post("/change-password")
-async def change_password(body: ChangePasswordRequest, request: Request):
+async def change_password(request: Request):
     if not _is_local_from_real_ip(request):
         return JSONResponse(
             status_code=403,
@@ -180,7 +188,11 @@ async def change_password(body: ChangePasswordRequest, request: Request):
         )
 
     config = _get_config(request)
-    config.change_password(body.new_password)
+    body = await _parse_body(request)
+    new_password = body.get("new_password", "")
+    if not new_password:
+        return JSONResponse(status_code=400, content={"detail": "new_password is required"})
+    config.change_password(new_password)
 
     from .websocket import manager
     disconnected = await manager.disconnect_remote_clients()
