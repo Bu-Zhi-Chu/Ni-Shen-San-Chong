@@ -525,16 +525,17 @@ Function PageLeaveEnvCheck
  ${EndIf}
 
  ; ── 清理前先杀掉旧进程（避免文件锁定导致删除失败） ──
- ExecWait 'powershell -NoProfile -WindowStyle Hidden -Command "Get-Process -Name openakita-setup-center -ErrorAction SilentlyContinue | Stop-Process -Force"' $0
- ${If} $0 != 0
-  ExecWait 'taskkill /IM openakita-setup-center.exe /T /F' $0
- ${EndIf}
- ExecWait 'powershell -NoProfile -WindowStyle Hidden -Command "Get-Process -Name openakita-server -ErrorAction SilentlyContinue | Stop-Process -Force"' $0
- ${If} $0 != 0
-  ExecWait 'taskkill /IM openakita-server.exe /T /F' $0
- ${EndIf}
+ ; nsExec 在隐藏控制台中执行，无弹窗
+ nsExec::ExecToLog 'powershell -NoProfile -Command "Get-Process -Name openakita-setup-center -ErrorAction SilentlyContinue | Stop-Process -Force"'
+ Pop $0
+ nsExec::ExecToLog 'taskkill /IM openakita-setup-center.exe /T /F'
+ Pop $0
+ nsExec::ExecToLog 'powershell -NoProfile -Command "Get-Process -Name openakita-server -ErrorAction SilentlyContinue | Stop-Process -Force"'
+ Pop $0
+ nsExec::ExecToLog 'taskkill /IM openakita-server.exe /T /F'
+ Pop $0
  !insertmacro _OpenAkita_KillAllServicePids
- Sleep 2000
+ Sleep 3000
 
  ; ── 自动清理环境组件（无需用户选择） ──
  ExpandEnvStrings $R0 "%USERPROFILE%\.openakita"
