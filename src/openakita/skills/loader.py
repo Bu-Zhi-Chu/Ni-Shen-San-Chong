@@ -5,7 +5,6 @@
 从标准目录结构加载 SKILL.md 定义的技能
 """
 
-import json
 import logging
 import shutil
 import subprocess
@@ -244,8 +243,6 @@ class SkillLoader:
         logger.info(f"Loaded {loaded} skills from {directory}")
         return loaded
 
-    I18N_FILENAME = ".openakita-i18n.json"
-
     @staticmethod
     def _is_os_compatible(supported_os: list[str]) -> bool:
         """Check if the current platform is in the skill's supported OS list.
@@ -299,23 +296,20 @@ class SkillLoader:
             return None
 
     def _load_i18n(self, skill_dir: Path, metadata: SkillMetadata) -> None:
-        """从 .openakita-i18n.json sidecar 文件加载国际化数据到 metadata。"""
-        i18n_file = skill_dir / self.I18N_FILENAME
-        if not i18n_file.exists():
-            return
-        try:
-            data = json.loads(i18n_file.read_text(encoding="utf-8"))
-            if not isinstance(data, dict):
-                return
-            for lang, fields in data.items():
-                if not isinstance(fields, dict):
-                    continue
-                if "name" in fields:
-                    metadata.name_i18n[lang] = str(fields["name"])
-                if "description" in fields:
-                    metadata.description_i18n[lang] = str(fields["description"])
-        except Exception as e:
-            logger.warning(f"Failed to load i18n for {skill_dir.name}: {e}")
+        """加载国际化数据到 metadata。
+
+        优先 agents/openai.yaml 的 i18n 字段，回退 .openakita-i18n.json。
+        """
+        from .i18n import read_i18n
+
+        data = read_i18n(skill_dir)
+        for lang, fields in data.items():
+            if not isinstance(fields, dict):
+                continue
+            if "name" in fields:
+                metadata.name_i18n[lang] = str(fields["name"])
+            if "description" in fields:
+                metadata.description_i18n[lang] = str(fields["description"])
 
     def get_skill(self, name: str) -> ParsedSkill | None:
         """获取已加载的技能"""

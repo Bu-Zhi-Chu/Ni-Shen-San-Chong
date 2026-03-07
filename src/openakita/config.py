@@ -4,7 +4,10 @@ OpenAkita 配置模块
 
 import json
 import logging
+import os
 from pathlib import Path
+
+os.environ.setdefault("OPENAKITA", "1")
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
