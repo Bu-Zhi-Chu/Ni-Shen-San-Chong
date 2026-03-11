@@ -1125,7 +1125,11 @@
     "resetFailed": "恢复默认失败",
     "import": "导入",
     "export": "导出",
-    "exportTooltip": "导出为 .akita-agent"
+    "exportTooltip": "导出为 .akita-agent",
+    "batchExport": "批量导出 ({{count}})",
+    "batchExportNone": "请先勾选要导出的 Agent",
+    "batchExportDone": "已导出 {{count}} 个 Agent",
+    "selectForBatch": "选择该 Agent 进行批量操作"
   },
   "dashboard": {
     "title": "Agent 仪表盘",

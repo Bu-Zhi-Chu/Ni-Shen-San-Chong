@@ -1125,7 +1125,11 @@
     "resetFailed": "Reset failed",
     "import": "Import",
     "export": "Export",
-    "exportTooltip": "Export as .akita-agent"
+    "exportTooltip": "Export as .akita-agent",
+    "batchExport": "Batch Export ({{count}})",
+    "batchExportNone": "Please select agents to export first",
+    "batchExportDone": "Exported {{count}} agent(s)",
+    "selectForBatch": "Select for batch operation"
   },
   "dashboard": {
     "title": "Agent Dashboard",

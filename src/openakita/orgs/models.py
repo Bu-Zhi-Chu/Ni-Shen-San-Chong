@@ -144,7 +144,7 @@ class OrgNode:
     skills_mode: str = "all"
     preferred_endpoint: str | None = None
     max_concurrent_tasks: int = 1
-    timeout_s: int = 300
+    timeout_s: int = 0
     can_delegate: bool = True
     can_escalate: bool = True
     can_request_scaling: bool = True
