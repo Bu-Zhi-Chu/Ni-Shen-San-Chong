@@ -211,9 +211,19 @@
     "readOnlyHint": "系统内置技能，不可编辑",
     "filePath": "文件路径",
     "source": "来源",
+    "confirmUninstall": "确定要卸载技能「{{name}}」吗？卸载后将删除技能文件。",
+    "uninstalling": "卸载中...",
+    "uninstallSuccess": "技能「{{name}}」已卸载",
+    "uninstallFailed": "卸载失败",
+    "systemCannotUninstall": "系统技能不可卸载",
     "skillType": "类型",
     "skillCategory": "分类",
-    "requiresBackend": "需要后端服务运行中"
+    "requiresBackend": "需要后端服务运行中",
+    "confirmUninstall": "确定要卸载技能「{{name}}」吗？卸载后将删除技能文件。",
+    "uninstalling": "卸载中...",
+    "uninstallSuccess": "技能「{{name}}」已卸载",
+    "uninstallFailed": "卸载失败",
+    "systemCannotUninstall": "系统技能不可卸载"
   },
   "mcp": {
     "title": "MCP 服务器管理",

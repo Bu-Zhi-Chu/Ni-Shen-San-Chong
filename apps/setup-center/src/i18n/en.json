@@ -211,9 +211,19 @@
     "readOnlyHint": "Built-in system skill, read-only",
     "filePath": "File Path",
     "source": "Source",
+    "confirmUninstall": "Are you sure you want to uninstall \"{{name}}\"? The skill files will be deleted.",
+    "uninstalling": "Uninstalling...",
+    "uninstallSuccess": "Skill \"{{name}}\" has been uninstalled",
+    "uninstallFailed": "Uninstall failed",
+    "systemCannotUninstall": "System skills cannot be uninstalled",
     "skillType": "Type",
     "skillCategory": "Category",
-    "requiresBackend": "Requires backend service running"
+    "requiresBackend": "Requires backend service running",
+    "confirmUninstall": "Are you sure you want to uninstall \"{{name}}\"? This will delete the skill files.",
+    "uninstalling": "Uninstalling...",
+    "uninstallSuccess": "Skill \"{{name}}\" has been uninstalled",
+    "uninstallFailed": "Uninstall failed",
+    "systemCannotUninstall": "System skills cannot be uninstalled"
   },
   "mcp": {
     "title": "MCP Server Management",

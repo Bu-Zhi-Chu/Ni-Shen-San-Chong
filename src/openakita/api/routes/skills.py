@@ -339,6 +339,52 @@ async def install_skill(request: Request):
     return result
 
 
+@router.post("/api/skills/uninstall")
+async def uninstall_skill(request: Request):
+    """卸载技能。
+
+    POST body: { "skill_id": "skill-directory-name" }
+    卸载后自动重新加载技能并刷新 allowlist。
+    """
+    from openakita.core.agent import Agent
+
+    body = await request.json()
+    skill_id = (body.get("skill_id") or "").strip()
+    if not skill_id:
+        return {"error": "skill_id is required"}
+
+    try:
+        from openakita.config import settings
+        workspace_dir = str(settings.project_root)
+    except Exception:
+        workspace_dir = str(__import__("pathlib").Path.cwd())
+
+    try:
+        from openakita.setup_center.bridge import uninstall_skill as _uninstall_skill
+        await asyncio.to_thread(_uninstall_skill, workspace_dir, skill_id)
+    except Exception as e:
+        logger.error("Skill uninstall failed: %s", e, exc_info=True)
+        return {"error": str(e)}
+
+    try:
+        agent = getattr(request.app.state, "agent", None)
+        actual_agent = agent
+        if not isinstance(agent, Agent):
+            actual_agent = getattr(agent, "_local_agent", None)
+        if actual_agent is not None:
+            loader = getattr(actual_agent, "skill_loader", None)
+            if loader:
+                loader.unload_skill(skill_id)
+                base_path, _ = _read_external_allowlist()
+                loader.load_all(base_path)
+            _apply_allowlist_and_rebuild_catalog(request)
+    except Exception as e:
+        logger.warning(f"Post-uninstall reload failed: {e}")
+
+    _notify_skills_changed("uninstall")
+    return {"status": "ok", "skill_id": skill_id}
+
+
 @router.post("/api/skills/reload")
 async def reload_skills(request: Request):
     """热重载技能（安装新技能后、修改 SKILL.md 后、切换启用/禁用后调用）。

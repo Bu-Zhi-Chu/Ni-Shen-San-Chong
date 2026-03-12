@@ -6,7 +6,7 @@ import { invoke, IS_TAURI } from "../platform";
 import { useTranslation } from "react-i18next";
 import type { SkillInfo, SkillConfigField, MarketplaceSkill, EnvMap } from "../types";
 import { envGet, envSet } from "../utils";
-import { IconGear, IconZap, IconPackage, IconStar, IconCheck, IconX, IconDownload, IconSearch, IconConfig, IconFolderOpen, IconEdit } from "../icons";
+import { IconGear, IconZap, IconPackage, IconStar, IconCheck, IconX, IconDownload, IconSearch, IconConfig, IconFolderOpen, IconEdit, IconTrash } from "../icons";
 import { safeFetch } from "../providers";
 import { ModalOverlay } from "../components/ModalOverlay";
 
@@ -141,6 +141,8 @@ function SkillCard({
   onToggleExpand,
   onToggleEnabled,
   onViewDetail,
+  onUninstall,
+  uninstalling,
   envDraft,
   onEnvChange,
   onSaveConfig,
@@ -151,6 +153,8 @@ function SkillCard({
   onToggleExpand: () => void;
   onToggleEnabled: () => void;
   onViewDetail: () => void;
+  onUninstall?: () => void;
+  uninstalling?: boolean;
   envDraft: EnvMap;
   onEnvChange: (fn: (prev: EnvMap) => EnvMap) => void;
   onSaveConfig: () => void;
@@ -202,13 +206,23 @@ function SkillCard({
             {displayDesc}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center" }}>
           <button
             onClick={onViewDetail}
             style={{ padding: "4px 10px", borderRadius: 8, border: "1px solid var(--line)", background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 700 }}
           >
             {t("skills.viewDetail")}
           </button>
+          {!skill.system && onUninstall && (
+            <button
+              onClick={onUninstall}
+              disabled={uninstalling}
+              title={t("skills.uninstall")}
+              style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid rgba(239,68,68,0.25)", background: "transparent", cursor: uninstalling ? "not-allowed" : "pointer", fontSize: 12, color: "#ef4444", opacity: uninstalling ? 0.5 : 1 }}
+            >
+              {uninstalling ? t("skills.uninstalling") : <IconTrash size={13} />}
+            </button>
+          )}
           <label style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
             <input
               type="checkbox"
@@ -263,6 +277,8 @@ function SkillDetailModal({
   onCancelEdit,
   onEditChange,
   onSave,
+  onUninstall,
+  uninstalling,
 }: {
   skill: SkillInfo;
   content: string;
@@ -278,6 +294,8 @@ function SkillDetailModal({
   onCancelEdit: () => void;
   onEditChange: (v: string) => void;
   onSave: () => void;
+  onUninstall?: () => void;
+  uninstalling?: boolean;
 }) {
   const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -404,6 +422,15 @@ function SkillDetailModal({
           )}
           {!isSystem && serviceRunning && (
             <>
+              {onUninstall && !isEditing && (
+                <button
+                  onClick={onUninstall}
+                  disabled={uninstalling || savingContent}
+                  style={{ padding: "6px 16px", borderRadius: 8, border: "1px solid rgba(239,68,68,0.3)", background: "transparent", cursor: uninstalling ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 700, color: "#ef4444", display: "inline-flex", alignItems: "center", gap: 4, opacity: uninstalling ? 0.5 : 1 }}
+                >
+                  <IconTrash size={12} /> {uninstalling ? t("skills.uninstalling") : t("skills.uninstall")}
+                </button>
+              )}
               <div style={{ flex: 1 }} />
               {isEditing ? (
                 <>
@@ -547,6 +574,8 @@ export function SkillManager({
   const [detailEditing, setDetailEditing] = useState(false);
   const [detailEditContent, setDetailEditContent] = useState("");
   const [detailSaving, setDetailSaving] = useState(false);
+  const [uninstallingSet, setUninstallingSet] = useState<Set<string>>(new Set());
+  const [uninstallConfirm, setUninstallConfirm] = useState<SkillInfo | null>(null);
   const marketRequestId = useRef(0);
   const detailRequestNameRef = useRef<string | null>(null);
   const { t } = useTranslation();
@@ -941,6 +970,55 @@ export function SkillManager({
     }
   }, [detailSkill, detailEditContent, serviceRunning, apiBaseUrl, loadSkills, onNotice, t]);
 
+  // ── 卸载技能（第一步：弹出确认） ──
+  const requestUninstall = useCallback((skill: SkillInfo) => {
+    if (skill.system) return;
+    setUninstallConfirm(skill);
+  }, []);
+
+  // ── 卸载技能（第二步：确认后执行） ──
+  const executeUninstall = useCallback(async (skill: SkillInfo) => {
+    const displayName = skill.name_i18n?.zh || skill.name_i18n?.en || skill.name;
+    const key = skill.skillId;
+    setUninstallingSet(prev => new Set(prev).add(key));
+    setError(null);
+    try {
+      if (serviceRunning && apiBaseUrl != null) {
+        const res = await safeFetch(`${apiBaseUrl}/api/skills/uninstall`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ skill_id: key }),
+          signal: AbortSignal.timeout(30_000),
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+      } else if (IS_TAURI && currentWorkspaceId) {
+        await invoke<string>("openakita_uninstall_skill", {
+          venvDir,
+          workspaceId: currentWorkspaceId,
+          skillName: key,
+        });
+      } else {
+        throw new Error(t("skills.envNotReady") || "环境未就绪");
+      }
+
+      if (detailSkill?.skillId === key) setDetailSkill(null);
+      setMarketplace(prev => prev.map(s => {
+        const sid = s.skillId || s.name;
+        if (sid === key || s.url === skill.sourceUrl) return { ...s, installed: false };
+        return s;
+      }));
+      onNotice?.(t("skills.uninstallSuccess", { name: displayName }));
+      await loadSkills();
+    } catch (e) {
+      const msg = String(e);
+      setError(msg);
+      onNotice?.(msg);
+    } finally {
+      setUninstallingSet(prev => { const next = new Set(prev); next.delete(key); return next; });
+    }
+  }, [serviceRunning, apiBaseUrl, venvDir, currentWorkspaceId, detailSkill, loadSkills, onNotice, t]);
+
   // ── 搜索 skills.sh 市场技能 ──
   const parseMarketplaceResponse = useCallback((data: Record<string, unknown>) => {
     const items: MarketplaceSkill[] = ((data.skills || []) as Record<string, unknown>[]).map((s) => {
@@ -1294,6 +1372,8 @@ export function SkillManager({
               onToggleExpand={() => setExpandedSkill(expandedSkill === skill.skillId ? null : skill.skillId)}
               onToggleEnabled={() => handleToggleEnabled(skill)}
               onViewDetail={() => handleViewDetail(skill)}
+              onUninstall={!skill.system ? () => requestUninstall(skill) : undefined}
+              uninstalling={uninstallingSet.has(skill.skillId)}
               envDraft={envDraft}
               onEnvChange={onEnvChange}
               onSaveConfig={() => handleSaveConfig(skill)}
@@ -1437,7 +1517,44 @@ export function SkillManager({
           onCancelEdit={() => { setDetailEditing(false); setDetailEditContent(""); }}
           onEditChange={setDetailEditContent}
           onSave={handleSaveContent}
+          onUninstall={!detailSkill.system ? () => requestUninstall(detailSkill) : undefined}
+          uninstalling={uninstallingSet.has(detailSkill.skillId)}
         />
+      )}
+
+      {/* 卸载确认弹窗 */}
+      {uninstallConfirm && (
+        <ModalOverlay onClose={() => setUninstallConfirm(null)}>
+          <div className="modalContent" style={{ maxWidth: 400, padding: "24px 28px", textAlign: "center" }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>🗑️</div>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>
+              {t("skills.uninstall")}
+            </div>
+            <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 20, lineHeight: 1.6 }}>
+              {t("skills.confirmUninstall", {
+                name: uninstallConfirm.name_i18n?.zh || uninstallConfirm.name_i18n?.en || uninstallConfirm.name,
+              })}
+            </div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+              <button
+                onClick={() => setUninstallConfirm(null)}
+                style={{ padding: "8px 24px", borderRadius: 8, border: "1px solid var(--line)", background: "transparent", cursor: "pointer", fontSize: 13, fontWeight: 600 }}
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                onClick={() => {
+                  const skill = uninstallConfirm;
+                  setUninstallConfirm(null);
+                  executeUninstall(skill);
+                }}
+                style={{ padding: "8px 24px", borderRadius: 8, border: "none", background: "#ef4444", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}
+              >
+                {t("skills.uninstall")}
+              </button>
+            </div>
+          </div>
+        </ModalOverlay>
       )}
     </>
   );
