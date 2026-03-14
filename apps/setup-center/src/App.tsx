@@ -5251,7 +5251,32 @@ export function App() {
   };
 
   function renderIM() {
-    return <IMConfigView {..._configViewProps} />;
+    const imDisabled = disabledViews.includes("im");
+    return (
+      <>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginBottom: 8 }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--muted)", cursor: "pointer" }}>
+            <span>{imDisabled ? "IM 通道 已禁用" : "IM 通道 已启用"}</span>
+            <div
+              onClick={() => toggleViewDisabled("im")}
+              style={{
+                width: 40, height: 22, borderRadius: 11, cursor: "pointer",
+                background: imDisabled ? "var(--line)" : "var(--ok)",
+                position: "relative", transition: "background 0.2s",
+              }}
+            >
+              <div style={{
+                width: 18, height: 18, borderRadius: 9, background: "#fff",
+                position: "absolute", top: 2,
+                left: imDisabled ? 2 : 20,
+                transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+              }} />
+            </div>
+          </label>
+        </div>
+        <IMConfigView {..._configViewProps} />
+      </>
+    );
   }
 
   function renderTools() {
@@ -5286,18 +5311,21 @@ export function App() {
                 {t("config.toolsMCP")}
               </span>
               <label className="inline-flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none" onClick={(e) => e.stopPropagation()}>
-                <span>{envDraft["MCP_ENABLED"] === "false" ? t("config.toolsSkillsDisabled") : t("config.toolsSkillsEnabled")}</span>
+                <span>{disabledViews.includes("mcp") ? t("config.toolsSkillsDisabled") : t("config.toolsSkillsEnabled")}</span>
                 <div
-                  onClick={() => setEnvDraft((p) => ({ ...p, MCP_ENABLED: p.MCP_ENABLED === "false" ? "true" : "false" }))}
+                  onClick={() => {
+                    toggleViewDisabled("mcp");
+                    setEnvDraft((p) => ({ ...p, MCP_ENABLED: disabledViews.includes("mcp") ? "true" : "false" }));
+                  }}
                   className="relative shrink-0 transition-colors duration-200 rounded-full"
                   style={{
                     width: 40, height: 22,
-                    background: envDraft["MCP_ENABLED"] === "false" ? "var(--line, #d1d5db)" : "var(--ok, #22c55e)",
+                    background: disabledViews.includes("mcp") ? "var(--line, #d1d5db)" : "var(--ok, #22c55e)",
                   }}
                 >
                   <div className="absolute top-0.5 rounded-full bg-white shadow-sm transition-[left] duration-200" style={{
                     width: 18, height: 18,
-                    left: envDraft["MCP_ENABLED"] === "false" ? 2 : 20,
+                    left: disabledViews.includes("mcp") ? 2 : 20,
                   }} />
                 </div>
               </label>
@@ -7767,17 +7795,12 @@ export function App() {
       );
     }
     if (view === "im") {
-      return (
-        <div>
-          {_disableToggle("im", "IM 通道")}
-          {disabledViews.includes("im") ? (
-            <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
-              <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，点击上方开关启用</p>
-            </div>
-          ) : (
-            <IMView serviceRunning={serviceStatus?.running ?? false} multiAgentEnabled={multiAgentEnabled} apiBaseUrl={apiBaseUrl} onRequestRestart={restartService} />
-          )}
+      return disabledViews.includes("im") ? (
+        <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
+          <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，请在「配置 → IM 通道」中启用</p>
         </div>
+      ) : (
+        <IMView serviceRunning={serviceStatus?.running ?? false} multiAgentEnabled={multiAgentEnabled} apiBaseUrl={apiBaseUrl} onRequestRestart={restartService} />
       );
     }
     if (view === "token_stats") {
@@ -7795,17 +7818,12 @@ export function App() {
       );
     }
     if (view === "mcp") {
-      return (
-        <div>
-          {_disableToggle("mcp", "MCP 管理")}
-          {disabledViews.includes("mcp") ? (
-            <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
-              <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，点击上方开关启用</p>
-            </div>
-          ) : (
-            <MCPView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
-          )}
+      return disabledViews.includes("mcp") ? (
+        <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
+          <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，请在「工具与技能」配置中启用</p>
         </div>
+      ) : (
+        <MCPView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
       );
     }
     if (view === "scheduler") {

@@ -85,9 +85,11 @@ export function Sidebar({
         <div className={`navItem ${view === "chat" ? "navItemActive" : ""}`} onClick={() => onViewChange("chat")} role="button" tabIndex={0} title={t("sidebar.chat")}>
           <IconChat size={16} /> {!collapsed && <span>{t("sidebar.chat")}</span>}
         </div>
-        <div className={`navItem ${view === "im" ? "navItemActive" : ""}`} onClick={() => onViewChange("im")} role="button" tabIndex={0} title={t("sidebar.im")} style={disabledViews.includes("im") ? { opacity: 0.4 } : undefined}>
-          <IconIM size={16} /> {!collapsed && <span>{t("sidebar.im")}</span>}
-        </div>
+        {!disabledViews.includes("im") && (
+          <div className={`navItem ${view === "im" ? "navItemActive" : ""}`} onClick={() => onViewChange("im")} role="button" tabIndex={0} title={t("sidebar.im")}>
+            <IconIM size={16} /> {!collapsed && <span>{t("sidebar.im")}</span>}
+          </div>
+        )}
         {!disabledViews.includes("skills") && (
           <div className={`navItem ${view === "skills" ? "navItemActive" : ""}`} onClick={() => onViewChange("skills")} role="button" tabIndex={0} title={t("sidebar.skills")}>
             <IconSkills size={16} /> {!collapsed && <span>{t("sidebar.skills")}</span>}
