@@ -695,9 +695,9 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
   );
 
   return (
-    <div>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
       {/* Header: Tabs + Search + Actions */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexShrink: 0 }}>
         <ToggleGroup
           type="single"
           value={activeTab}
@@ -733,6 +733,9 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
           </Button>
         </div>
       </div>
+
+      {/* Middle: scrollable content */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
 
       {/* Form dialog */}
       {showForm && (
@@ -1027,6 +1030,20 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
         </div>
       )}
       <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
+
+      </div>{/* end scrollable middle */}
+
+      {/* Footer: status legend */}
+      <div style={{
+        flexShrink: 0, display: "flex", alignItems: "center", gap: 16,
+        padding: "8px 4px", borderTop: "1px solid var(--line)",
+        fontSize: 11, color: "var(--muted)",
+      }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><DotGreen size={6} /> 已调度</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><DotYellow size={6} /> 执行中</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><DotRed size={6} /> 失败</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><DotGray size={6} /> 已完成 / 已禁用</span>
+      </div>
     </div>
   );
 }

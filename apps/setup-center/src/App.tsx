@@ -5313,10 +5313,23 @@ export function App() {
               <label className="inline-flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none" onClick={(e) => e.stopPropagation()}>
                 <span>{disabledViews.includes("mcp") ? t("config.toolsSkillsDisabled") : t("config.toolsSkillsEnabled")}</span>
                 <div
-                  onClick={() => {
+                  onClick={async () => {
                     const willDisable = !disabledViews.includes("mcp");
                     toggleViewDisabled("mcp");
                     setEnvDraft((p) => ({ ...p, MCP_ENABLED: willDisable ? "false" : "true" }));
+                    try {
+                      const entries = { MCP_ENABLED: willDisable ? "false" : "true" };
+                      if (shouldUseHttpApi()) {
+                        await safeFetch(`${httpApiBase()}/api/config/env`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ entries }),
+                        });
+                        notifySuccess(willDisable
+                          ? t("config.mcpDisabledNeedRestart", { defaultValue: "MCP 已禁用，重启后生效" })
+                          : t("config.mcpEnabledNeedRestart", { defaultValue: "MCP 已启用，重启后生效" }));
+                      }
+                    } catch { /* ignore */ }
                   }}
                   className="relative shrink-0 transition-colors duration-200 rounded-full"
                   style={{
@@ -7811,7 +7824,7 @@ export function App() {
     }
     if (view === "scheduler") {
       return (
-        <div>
+        <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
           {_disableToggle("scheduler", t("scheduler.title"))}
           {disabledViews.includes("scheduler") ? (
             <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
@@ -8276,7 +8289,11 @@ export function App() {
               }}
             />
           </div>
-          <div className="content" style={{ display: view !== "chat" ? undefined : "none", flex: 1, minHeight: 0 }}>
+          <div className="content" style={{
+            display: view !== "chat" ? "flex" : "none",
+            flexDirection: "column",
+            flex: 1, minHeight: 0,
+          }}>
             {renderStepContent()}
           </div>
         </div>
