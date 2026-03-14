@@ -1,10 +1,18 @@
 import React, { useEffect, useState, useCallback } from "react";
-import {
-  IconRefresh, IconTrash, IconEdit, IconCheck, IconX,
-  IconSearch, IconBrain, IconLoader,
-} from "../icons";
+import { IconBrain } from "../icons";
 import { safeFetch } from "../providers";
-import { ConfirmDialog } from "../components/ConfirmDialog";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel,
+  AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
+  AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Loader2, RefreshCw, Trash2, Pencil, Check, X, Search, Brain } from "lucide-react";
 
 type MemoryItem = {
   id: string;
@@ -87,8 +95,6 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
   const [editContent, setEditContent] = useState("");
   const [editScore, setEditScore] = useState(0);
   const [reviewing, setReviewing] = useState(false);
-  const [reviewResult, setReviewResult] = useState<ReviewResult | null>(null);
-  const [error, setError] = useState("");
   const [showReviewConfirm, setShowReviewConfirm] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth <= 768);
@@ -102,7 +108,6 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
   const loadMemories = useCallback(async () => {
     if (!serviceRunning) return;
     setLoading(true);
-    setError("");
     try {
       const params = new URLSearchParams();
       if (searchQuery) params.set("search", searchQuery);
@@ -111,7 +116,7 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
       const data = await res.json();
       setMemories(data.memories || []);
     } catch (e: any) {
-      setError(e.message || "加载失败");
+      toast.error(e.message || "加载失败");
     } finally {
       setLoading(false);
     }
@@ -137,7 +142,7 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
       setSelected(prev => { const n = new Set(prev); n.delete(id); return n; });
       loadStats();
     } catch (e: any) {
-      setError(e.message);
+      toast.error(e.message);
     }
   };
 
@@ -160,9 +165,8 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
       setMemories(prev => prev.filter(m => !new Set(ids).has(m.id)));
       setSelected(new Set());
       loadStats();
-      setError("");
     } catch (e: any) {
-      setError(e.message);
+      toast.error(e.message);
     }
   }, [API_BASE, loadStats]);
 
@@ -187,7 +191,7 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
       ));
       setEditingId(null);
     } catch (e: any) {
-      setError(e.message);
+      toast.error(e.message);
     }
   };
 
@@ -202,8 +206,6 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
   const handleReview = async () => {
     setShowReviewConfirm(false);
     setReviewing(true);
-    setReviewResult(null);
-    setError("");
     try {
       const res = await safeFetch(`${API_BASE}/api/memories/review`, {
         method: "POST",
@@ -212,14 +214,17 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
       const data = await res.json();
       const review: ReviewResult = data?.review ?? data;
       if (review && typeof review.deleted === "number") {
-        setReviewResult(review);
+        toast.success(
+          `LLM 审查完成：删除 ${review.deleted}，更新 ${review.updated}，合并 ${review.merged}，保留 ${review.kept}` +
+          (review.errors > 0 ? `，错误 ${review.errors}` : "")
+        );
         loadMemories();
         loadStats();
       } else {
-        setError("审查完成，但返回数据格式异常");
+        toast.error("审查完成，但返回数据格式异常");
       }
     } catch (e: any) {
-      setError(e.message || "审查请求失败");
+      toast.error(e.message || "审查请求失败");
     } finally {
       setReviewing(false);
     }
@@ -279,158 +284,70 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
       )}
 
       {/* Toolbar */}
-      <div className="card" style={{ padding: isMobile ? "10px 12px" : "12px 16px" }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <div style={{ position: "relative", flex: 1, minWidth: isMobile ? 140 : 200 }}>
-            <span style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", pointerEvents: "none", display: "flex" }}>
-              <IconSearch size={14} />
-            </span>
-            <input
-              type="text"
-              placeholder="搜索记忆内容..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && loadMemories()}
-              style={{
-                width: "100%", padding: "6px 8px 6px 28px", border: "1px solid var(--line)",
-                borderRadius: 6, background: "var(--bg)", color: "var(--text)", fontSize: 13,
-              }}
-            />
-          </div>
-
-          <select
-            value={filterType}
-            onChange={e => setFilterType(e.target.value)}
-            style={{
-              padding: "6px 8px", border: "1px solid var(--line)",
-              borderRadius: 6, background: "var(--bg)", color: "var(--text)", fontSize: 13,
-              maxWidth: isMobile ? 100 : undefined,
-            }}
-          >
-            <option value="">全部类型</option>
-            {Object.entries(TYPE_LABELS).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
-          </select>
-
-          <button
-            onClick={loadMemories}
-            disabled={loading}
-            style={{
-              display: "flex", alignItems: "center", gap: 4, padding: "6px 12px",
-              border: "1px solid var(--line)", borderRadius: 6,
-              background: "var(--bg)", color: "var(--text)", cursor: "pointer", fontSize: 13,
-            }}
-          >
-            <IconRefresh size={14} />{!isMobile && " 刷新"}
-          </button>
-
-          {selected.size > 0 && (
-            <button
-              onClick={handleBatchDelete}
-              style={{
-                display: "flex", alignItems: "center", gap: 4, padding: "6px 12px",
-                border: "1px solid #ef4444", borderRadius: 6,
-                background: "#ef4444", color: "#fff", cursor: "pointer", fontSize: 13,
-              }}
-            >
-              <IconTrash size={14} /> 删除 {selected.size} 条
-            </button>
-          )}
-
-          <button
-            onClick={handleReviewConfirm}
-            disabled={reviewing}
-            style={{
-              display: "flex", alignItems: "center", gap: 4, padding: "6px 12px",
-              border: "none", borderRadius: 6,
-              background: "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff",
-              cursor: reviewing ? "wait" : "pointer", fontSize: 13, fontWeight: 500,
-              opacity: reviewing ? 0.7 : 1,
-            }}
-          >
-            {reviewing ? <IconLoader size={14} /> : <IconBrain size={14} />}
-            {reviewing ? "审查中..." : isMobile ? "LLM 审查" : "LLM 智能审查"}
-          </button>
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          <Input
+            placeholder="搜索记忆内容..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && loadMemories()}
+            className="pl-8"
+          />
         </div>
+
+        <Select value={filterType || "__all__"} onValueChange={v => setFilterType(v === "__all__" ? "" : v)}>
+          <SelectTrigger className="w-[110px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">全部类型</SelectItem>
+            {Object.entries(TYPE_LABELS).map(([k, v]) => (
+              <SelectItem key={k} value={k}>{v}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Button variant="outline" size="sm" onClick={loadMemories} disabled={loading}>
+          {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+          {!isMobile && " 刷新"}
+        </Button>
+
+        {selected.size > 0 && (
+          <Button variant="destructive" size="sm" onClick={handleBatchDelete}>
+            <Trash2 size={14} /> 删除 {selected.size} 条
+          </Button>
+        )}
+
+        <Button
+          size="sm"
+          onClick={handleReviewConfirm}
+          disabled={reviewing}
+          className="bg-gradient-to-br from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white border-0"
+        >
+          {reviewing ? <Loader2 size={14} className="animate-spin" /> : <Brain size={14} />}
+          {reviewing ? "审查中..." : isMobile ? "LLM 审查" : "LLM 智能审查"}
+        </Button>
       </div>
 
-      {/* Review confirm modal */}
-      {showReviewConfirm && (
-        <div
-          style={{
-            position: "fixed", inset: 0, zIndex: 9999,
-            background: "rgba(0,0,0,0.45)", display: "flex",
-            alignItems: "center", justifyContent: "center",
-            padding: isMobile ? 16 : 0,
-          }}
-          onClick={() => setShowReviewConfirm(false)}
-        >
-          <div
-            style={{
-              background: "var(--card, #fff)", borderRadius: 12,
-              padding: "24px 28px", maxWidth: 400, width: "90%",
-              boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
-            }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text)", marginBottom: 10 }}>
-              启动 LLM 智能审查
-            </div>
-            <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6, marginBottom: 20 }}>
+      {/* Review confirm dialog */}
+      <AlertDialog open={showReviewConfirm} onOpenChange={setShowReviewConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>启动 LLM 智能审查</AlertDialogTitle>
+            <AlertDialogDescription>
               将由大模型逐条审查所有记忆，删除垃圾、合并重复。此操作可能需要较长时间，请耐心等待。
-            </div>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button
-                onClick={() => setShowReviewConfirm(false)}
-                style={{
-                  padding: "6px 16px", borderRadius: 6, fontSize: 13,
-                  border: "1px solid var(--line)", background: "var(--bg)",
-                  color: "var(--text)", cursor: "pointer",
-                }}
-              >
-                取消
-              </button>
-              <button
-                onClick={handleReview}
-                style={{
-                  padding: "6px 16px", borderRadius: 6, fontSize: 13,
-                  border: "none", cursor: "pointer", fontWeight: 500,
-                  background: "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff",
-                }}
-              >
-                确认审查
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Review result toast */}
-      {reviewResult && (
-        <div
-          style={{
-            padding: "10px 16px", borderRadius: 8,
-            background: "linear-gradient(135deg, rgba(99,102,241,0.1), rgba(139,92,246,0.1))",
-            border: "1px solid rgba(99,102,241,0.3)",
-            fontSize: 13, color: "var(--text)",
-          }}
-        >
-          LLM 审查完成：
-          <strong style={{ color: "#ef4444" }}> 删除 {reviewResult.deleted}</strong>，
-          <strong style={{ color: "#f59e0b" }}> 更新 {reviewResult.updated}</strong>，
-          <strong style={{ color: "#6366f1" }}> 合并 {reviewResult.merged}</strong>，
-          <strong style={{ color: "#10b981" }}> 保留 {reviewResult.kept}</strong>
-          {reviewResult.errors > 0 && <span style={{ color: "#ef4444" }}>，错误 {reviewResult.errors}</span>}
-        </div>
-      )}
-
-      {/* Error */}
-      {error && (
-        <div style={{ padding: "8px 12px", borderRadius: 6, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "#ef4444", fontSize: 13 }}>
-          {error}
-        </div>
-      )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleReview}
+              className="bg-gradient-to-br from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white border-0"
+            >
+              确认审查
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Memory list */}
       {isMobile ? (
@@ -438,7 +355,7 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {loading ? (
             <div className="card" style={{ textAlign: "center", padding: 40, color: "var(--muted)" }}>
-              <IconLoader size={20} /> 加载中...
+              <Loader2 size={20} className="inline animate-spin mr-2" />加载中...
             </div>
           ) : memories.length === 0 ? (
             <div className="card" style={{ textAlign: "center", padding: 40, color: "var(--muted)" }}>
@@ -446,9 +363,9 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
             </div>
           ) : (
             <>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 4px" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted)", cursor: "pointer" }}>
-                  <input type="checkbox" checked={selected.size === memories.length && memories.length > 0} onChange={selectAll} style={{ width: 16, height: 16, flexShrink: 0 }} />
+              <div className="flex items-center gap-2 px-1">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                  <Checkbox checked={selected.size === memories.length && memories.length > 0} onCheckedChange={selectAll} />
                   全选 ({memories.length})
                 </label>
               </div>
@@ -464,7 +381,7 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
                 >
                   {/* Header row: checkbox + type badge + score + date */}
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                    <input type="checkbox" checked={selected.has(m.id)} onChange={() => toggleSelect(m.id)} style={{ width: 16, height: 16, flexShrink: 0 }} />
+                    <Checkbox checked={selected.has(m.id)} onCheckedChange={() => toggleSelect(m.id)} />
                     <span style={{
                       display: "inline-block", padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 500,
                       whiteSpace: "nowrap",
@@ -487,34 +404,27 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
 
                   {/* Content */}
                   {editingId === m.id ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <textarea
+                    <div className="flex flex-col gap-1.5">
+                      <Textarea
                         value={editContent}
                         onChange={e => setEditContent(e.target.value)}
                         rows={3}
-                        style={{
-                          width: "100%", padding: 6, border: "1px solid var(--line)",
-                          borderRadius: 4, background: "var(--bg)", color: "var(--text)",
-                          fontSize: 13, resize: "vertical",
-                        }}
+                        className="resize-y text-sm"
                       />
-                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                        <span style={{ fontSize: 11, color: "var(--muted)" }}>分数:</span>
-                        <input
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] text-muted-foreground">分数:</span>
+                        <Input
                           type="number" min={0} max={1} step={0.05}
                           value={editScore}
                           onChange={e => setEditScore(parseFloat(e.target.value) || 0)}
-                          style={{
-                            width: 70, padding: "2px 6px", border: "1px solid var(--line)",
-                            borderRadius: 4, background: "var(--bg)", color: "var(--text)", fontSize: 12,
-                          }}
+                          className="w-[70px] h-7 text-xs"
                         />
-                        <button onClick={() => handleUpdate(m.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#10b981", padding: 4 }}>
-                          <IconCheck size={16} />
-                        </button>
-                        <button onClick={() => setEditingId(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#ef4444", padding: 4 }}>
-                          <IconX size={16} />
-                        </button>
+                        <Button variant="ghost" size="icon-sm" className="text-emerald-500 hover:text-emerald-600" onClick={() => handleUpdate(m.id)}>
+                          <Check size={16} />
+                        </Button>
+                        <Button variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" onClick={() => setEditingId(null)}>
+                          <X size={16} />
+                        </Button>
                       </div>
                     </div>
                   ) : (
@@ -551,27 +461,13 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
 
                   {/* Actions */}
                   {editingId !== m.id && (
-                    <div style={{ display: "flex", gap: 8, marginTop: 8, justifyContent: "flex-end" }}>
-                      <button
-                        onClick={() => startEdit(m)}
-                        style={{
-                          background: "none", border: "1px solid var(--line)", borderRadius: 6,
-                          cursor: "pointer", padding: "4px 10px", color: "var(--text)",
-                          display: "flex", alignItems: "center", gap: 4, fontSize: 12,
-                        }}
-                      >
-                        <IconEdit size={12} /> 编辑
-                      </button>
-                      <button
-                        onClick={() => handleDelete(m.id)}
-                        style={{
-                          background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 6,
-                          cursor: "pointer", padding: "4px 10px", color: "#ef4444",
-                          display: "flex", alignItems: "center", gap: 4, fontSize: 12,
-                        }}
-                      >
-                        <IconTrash size={12} /> 删除
-                      </button>
+                    <div className="flex gap-2 mt-2 justify-end">
+                      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => startEdit(m)}>
+                        <Pencil size={12} /> 编辑
+                      </Button>
+                      <Button variant="outline" size="sm" className="h-7 text-xs text-destructive border-destructive/30 hover:text-destructive hover:bg-destructive/10" onClick={() => handleDelete(m.id)}>
+                        <Trash2 size={12} /> 删除
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -586,11 +482,9 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
             <thead>
               <tr style={{ background: "var(--bg)", borderBottom: "1px solid var(--line)" }}>
                 <th style={{ padding: "8px 12px", textAlign: "left", width: 36 }}>
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={selected.size === memories.length && memories.length > 0}
-                    onChange={selectAll}
-                    style={{ width: 16, height: 16 }}
+                    onCheckedChange={selectAll}
                   />
                 </th>
                 <th style={{ padding: "8px 12px", textAlign: "left", width: 80 }}>类型</th>
@@ -604,7 +498,7 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
               {loading ? (
                 <tr>
                   <td colSpan={6} style={{ textAlign: "center", padding: 40, color: "var(--muted)" }}>
-                    <IconLoader size={20} /> 加载中...
+                    <Loader2 size={20} className="inline animate-spin mr-2" />加载中...
                   </td>
                 </tr>
               ) : memories.length === 0 ? (
@@ -625,7 +519,7 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
                   onMouseLeave={e => { if (!selected.has(m.id)) (e.currentTarget as HTMLElement).style.background = ""; }}
                 >
                   <td style={{ padding: "8px 12px" }}>
-                    <input type="checkbox" checked={selected.has(m.id)} onChange={() => toggleSelect(m.id)} style={{ width: 16, height: 16 }} />
+                    <Checkbox checked={selected.has(m.id)} onCheckedChange={() => toggleSelect(m.id)} />
                   </td>
                   <td style={{ padding: "8px 12px" }}>
                     <span style={{
@@ -640,34 +534,27 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
                   </td>
                   <td style={{ padding: "8px 12px", maxWidth: 400 }}>
                     {editingId === m.id ? (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <textarea
+                      <div className="flex flex-col gap-1.5">
+                        <Textarea
                           value={editContent}
                           onChange={e => setEditContent(e.target.value)}
                           rows={3}
-                          style={{
-                            width: "100%", padding: 6, border: "1px solid var(--line)",
-                            borderRadius: 4, background: "var(--bg)", color: "var(--text)",
-                            fontSize: 12, resize: "vertical",
-                          }}
+                          className="resize-y text-xs"
                         />
-                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          <span style={{ fontSize: 11, color: "var(--muted)" }}>分数:</span>
-                          <input
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] text-muted-foreground">分数:</span>
+                          <Input
                             type="number" min={0} max={1} step={0.05}
                             value={editScore}
                             onChange={e => setEditScore(parseFloat(e.target.value) || 0)}
-                            style={{
-                              width: 70, padding: "2px 6px", border: "1px solid var(--line)",
-                              borderRadius: 4, background: "var(--bg)", color: "var(--text)", fontSize: 12,
-                            }}
+                            className="w-[70px] h-7 text-xs"
                           />
-                          <button onClick={() => handleUpdate(m.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#10b981" }}>
-                            <IconCheck size={14} />
-                          </button>
-                          <button onClick={() => setEditingId(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#ef4444" }}>
-                            <IconX size={14} />
-                          </button>
+                          <Button variant="ghost" size="icon-sm" className="text-emerald-500 hover:text-emerald-600" onClick={() => handleUpdate(m.id)}>
+                            <Check size={14} />
+                          </Button>
+                          <Button variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" onClick={() => setEditingId(null)}>
+                            <X size={14} />
+                          </Button>
                         </div>
                       </div>
                     ) : (
@@ -710,27 +597,13 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
                     {fmtDate(m.created_at)}
                   </td>
                   <td style={{ padding: "8px 12px", textAlign: "center" }}>
-                    <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-                      <button
-                        onClick={() => startEdit(m)}
-                        title="编辑"
-                        style={{
-                          background: "none", border: "1px solid var(--line)", borderRadius: 4,
-                          cursor: "pointer", padding: "3px 6px", color: "var(--text)",
-                        }}
-                      >
-                        <IconEdit size={12} />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(m.id)}
-                        title="删除"
-                        style={{
-                          background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4,
-                          cursor: "pointer", padding: "3px 6px", color: "#ef4444",
-                        }}
-                      >
-                        <IconTrash size={12} />
-                      </button>
+                    <div className="flex gap-1 justify-center">
+                      <Button variant="ghost" size="icon-sm" title="编辑" className="text-muted-foreground hover:text-foreground" onClick={() => startEdit(m)}>
+                        <Pencil size={13} />
+                      </Button>
+                      <Button variant="ghost" size="icon-sm" title="删除" className="text-muted-foreground hover:text-destructive" onClick={() => handleDelete(m.id)}>
+                        <Trash2 size={13} />
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -739,7 +612,20 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
           </table>
         </div>
       )}
-      <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
+      <AlertDialog open={!!confirmDialog} onOpenChange={open => { if (!open) setConfirmDialog(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认操作</AlertDialogTitle>
+            <AlertDialogDescription className="whitespace-pre-wrap">{confirmDialog?.message}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { confirmDialog?.onConfirm(); setConfirmDialog(null); }}>
+              确认
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
