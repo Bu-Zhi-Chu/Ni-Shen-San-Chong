@@ -325,42 +325,70 @@ Function PageLeaveReinstall
  ${EndIf}
 
  reinst_uninstall:
- HideWindow
- ClearErrors
+  HideWindow
 
- ${If} $WixMode = 1
- ReadRegStr $R1 HKLM "$R6" "UninstallString"
- ExecWait '$R1' $0
- ${Else}
- ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
- ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
- ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
- ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
- StrCpy $R1 "$R1 _?=$4" ; append uninstall directory
- ExecWait '$R1' $0
- ${EndIf}
+  ; Kill all OpenAkita processes BEFORE running old uninstaller,
+  ; because the old uninstaller may lack robust process-killing logic.
+  ; Save $R6 first — _OpenAkita_KillServicePidsIn clobbers $R1/$R2/$R6,
+  ; and $R6 holds the WiX registry key path when WixMode=1.
+  ; (Push/Pop is safe here: all nsExec Push/Pop pairs inside the macro are balanced.)
+  Push $R6
+  !ifmacrodef NSIS_HOOK_PREINSTALL_KILLPROCS
+    !insertmacro NSIS_HOOK_PREINSTALL_KILLPROCS
+  !endif
+  Pop $R6
 
- BringToFront
+  ClearErrors
 
- ${IfThen} ${Errors} ${|} StrCpy $0 2 ${|} ; ExecWait failed, set fake exit code
+  ${If} $WixMode = 1
+    ReadRegStr $R1 HKLM "$R6" "UninstallString"
+    ExecWait '$R1' $0
+  ${Else}
+    ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
+    ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
 
- ${If} $0 <> 0
- ${OrIf} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
- ; User cancelled wix uninstaller? return to select un/reinstall page
- ${If} $WixMode = 1
- ${AndIf} $0 = 1602
- Abort
- ${EndIf}
+    ; Guard: if UninstallString is empty, skip ExecWait
+    ${If} $R1 == ""
+      StrCpy $0 0
+      Goto reinst_uninstall_check
+    ${EndIf}
 
- ; User cancelled NSIS uninstaller? return to select un/reinstall page
- ${If} $0 = 1
- Abort
- ${EndIf}
+    ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
+    ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
+    ; _?= makes ExecWait truly synchronous (without it, uninstaller copies to
+    ; temp and exits immediately). Fall back to $INSTDIR when $4 is empty.
+    ${If} $4 != ""
+      StrCpy $R1 "$R1 _?=$4"
+    ${Else}
+      StrCpy $R1 "$R1 _?=$INSTDIR"
+    ${EndIf}
+    ExecWait '$R1' $0
+  ${EndIf}
 
- ; Other erros? show generic error message and return to select un/reinstall page
- MessageBox MB_ICONEXCLAMATION "$(unableToUninstall)"
- Abort
- ${EndIf}
+  reinst_uninstall_check:
+  BringToFront
+
+  ${IfThen} ${Errors} ${|} StrCpy $0 2 ${|} ; ExecWait failed, set fake exit code
+
+  ${If} $0 <> 0
+  ${OrIf} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
+    ; User cancelled wix uninstaller? return to select un/reinstall page
+    ${If} $WixMode = 1
+    ${AndIf} $0 = 1602
+    Abort
+    ${EndIf}
+
+    ; User cancelled NSIS uninstaller? return to select un/reinstall page
+    ${If} $0 = 1
+    Abort
+    ${EndIf}
+
+    ; Uninstall failed — offer user a choice: force-continue or abort
+    MessageBox MB_YESNO|MB_ICONEXCLAMATION "$(unableToUninstall)$\n$\n是否仍然继续安装？（将覆盖旧版本文件）" IDYES reinst_force_continue
+    Abort
+
+    reinst_force_continue:
+  ${EndIf}
  reinst_done:
 FunctionEnd
 
