@@ -27,7 +27,7 @@ import type {
   EndpointSummary as EndpointSummaryType,
   PlatformInfo, WorkspaceSummary, ProviderInfo, ListedModel,
   EndpointDraft, PythonCandidate, BundledPythonInstallResult, InstallSource,
-  EnvMap, StepId, Step, PythonDiagnostic,
+  EnvMap, StepId, Step,
 } from "./types";
 import {
   IconRefresh, IconCheck, IconCheckCircle, IconX, IconXCircle,
@@ -46,6 +46,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import logoUrl from "./assets/logo.png";
 import "highlight.js/styles/github.css";
@@ -84,6 +85,7 @@ import { WebPasswordManager } from "./components/WebPasswordManager";
 import { FieldText, FieldBool, FieldSelect, FieldCombo, TelegramPairingCodeHint } from "./components/EnvFields";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ModalOverlay } from "./components/ModalOverlay";
+import { Section } from "./components/Section";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { useNotifications } from "./hooks/useNotifications";
@@ -471,12 +473,6 @@ export function App() {
   const [pypiVersions, setPypiVersions] = useState<string[]>([]);
   const [pypiVersionsLoading, setPypiVersionsLoading] = useState(false);
   const [selectedPypiVersion, setSelectedPypiVersion] = useState<string>(""); // "" = 推荐同版本
-  // python diagnostics / repair
-  const [pyDiag, setPyDiag] = useState<PythonDiagnostic | null>(null);
-  const [repairStage, setRepairStage] = useState<string>("");
-  const [repairPercent, setRepairPercent] = useState<number>(0);
-  const [repairDetail, setRepairDetail] = useState<string>("");
-
   // advanced panel state
   const [advSysInfo, setAdvSysInfo] = useState<Record<string, string> | null>(null);
   const [advLoading, setAdvLoading] = useState<Record<string, boolean>>({});
@@ -484,13 +480,10 @@ export function App() {
   const advLoadedRef = useRef(false);
 
   // backup state
-  const [backupSettings, setBackupSettings] = useState<{
-    enabled: boolean; cron: string; backup_path: string;
-    max_backups: number; include_userdata: boolean; include_media: boolean;
-  }>({ enabled: false, cron: "0 2 * * *", backup_path: "", max_backups: 5, include_userdata: true, include_media: false });
   const [backupHistory, setBackupHistory] = useState<Array<{ filename: string; path: string; size_bytes: number; created_at: string; manifest?: any }>>([]);
-  const [backupSettingsLoaded, setBackupSettingsLoaded] = useState(false);
   const [backupShowHistory, setBackupShowHistory] = useState(false);
+  const [factoryResetOpen, setFactoryResetOpen] = useState(false);
+  const [factoryResetConfirmText, setFactoryResetConfirmText] = useState("");
 
   // providers & models
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -1246,68 +1239,6 @@ export function App() {
     } finally {
       dismissLoading(_busyId);
     }
-  }
-
-  async function doDiagnosePython() {
-    const _busyId = notifyLoading(t("config.pyDiagnoseRunning"));
-    setPyDiag(null);
-    try {
-      const d = await invoke<NonNullable<typeof pyDiag>>("diagnose_python_env", { venvDir });
-      setPyDiag(d);
-    } catch (e) {
-      notifyError(String(e));
-    } finally {
-      dismissLoading(_busyId);
-    }
-  }
-
-  async function executeRepairPython(forceRebuild: boolean) {
-    setRepairStage("");
-    setRepairPercent(0);
-    setRepairDetail("");
-    const _busyId = notifyLoading(t("config.pyRepairRunning"));
-
-    const unlisten = await listen("python_repair_event", (ev) => {
-      const p = ev.payload as any;
-      if (!p || typeof p !== "object") return;
-      if (p.stage) setRepairStage(String(p.stage));
-      if (typeof p.percent === "number") setRepairPercent(p.percent);
-      if (p.detail) setRepairDetail(String(p.detail));
-    });
-
-    try {
-      const d = await invoke<NonNullable<typeof pyDiag>>("repair_python_env", { venvDir, forceRebuild });
-      setPyDiag(d);
-      if (d && d.summary === "healthy") {
-        notifySuccess(t("config.pyRepairDone"));
-        setVenvReady(true);
-        const openakitaOk = d.contracts.some((c) => c.id === "C3_OPENAKITA_IN_VENV" && c.status === "pass");
-        setOpenakitaInstalled(openakitaOk);
-        await persistPythonEnvConfig(venvDir);
-        try {
-          const cands = await invoke<PythonCandidate[]>("detect_python");
-          setPythonCandidates(cands);
-          const firstUsable = cands.findIndex((c: PythonCandidate) => c.isUsable);
-          setSelectedPythonIdx(firstUsable);
-        } catch { /* best-effort */ }
-      } else {
-        const failed = d?.contracts?.filter((c) => c.status !== "pass").map((c) => `${c.code}`).join("; ");
-        notifyError(t("config.pyRepairFail") + (failed ? `: ${failed}` : ""));
-      }
-    } catch (e) {
-      notifyError(t("config.pyRepairFail") + `: ${String(e)}`);
-    } finally {
-      unlisten();
-      dismissLoading(_busyId);
-    }
-  }
-
-  function doRepairPython() {
-    if (pyDiag?.summary === "healthy") {
-      askConfirm(t("adv.repairHealthyConfirm"), () => executeRepairPython(true));
-      return;
-    }
-    executeRepairPython(false);
   }
 
   async function doFetchPypiVersions() {
@@ -3008,18 +2939,24 @@ export function App() {
           "AGENT_NAME", "MAX_ITERATIONS", "SELFCHECK_AUTOFIX",
           "THINKING_MODE",
           "PROGRESS_TIMEOUT_SECONDS", "HARD_TIMEOUT_SECONDS",
-          "DATABASE_PATH", "LOG_LEVEL",
-          "LOG_DIR", "LOG_FILE_PREFIX", "LOG_MAX_SIZE_MB", "LOG_BACKUP_COUNT",
-          "LOG_RETENTION_DAYS", "LOG_FORMAT", "LOG_TO_CONSOLE", "LOG_TO_FILE",
           "EMBEDDING_MODEL", "EMBEDDING_DEVICE", "MODEL_DOWNLOAD_SOURCE",
           "MEMORY_HISTORY_DAYS", "MEMORY_MAX_HISTORY_FILES", "MEMORY_MAX_HISTORY_SIZE_MB",
           "PERSONA_NAME",
           "PROACTIVE_ENABLED", "PROACTIVE_MAX_DAILY_MESSAGES", "PROACTIVE_MIN_INTERVAL_MINUTES",
           "PROACTIVE_QUIET_HOURS_START", "PROACTIVE_QUIET_HOURS_END", "PROACTIVE_IDLE_THRESHOLD_HOURS",
           "STICKER_ENABLED", "STICKER_DATA_DIR",
-          "DESKTOP_NOTIFY_ENABLED", "DESKTOP_NOTIFY_SOUND",
           "SCHEDULER_TIMEZONE", "SCHEDULER_TASK_TIMEOUT",
+        ];
+      case "advanced":
+        return [
+          "DATABASE_PATH", "LOG_LEVEL",
+          "LOG_DIR", "LOG_FILE_PREFIX", "LOG_MAX_SIZE_MB", "LOG_BACKUP_COUNT",
+          "LOG_RETENTION_DAYS", "LOG_FORMAT", "LOG_TO_CONSOLE", "LOG_TO_FILE",
+          "DESKTOP_NOTIFY_ENABLED", "DESKTOP_NOTIFY_SOUND",
           "SESSION_TIMEOUT_MINUTES", "SESSION_MAX_HISTORY", "SESSION_STORAGE_PATH",
+          "API_HOST", "TRUST_PROXY",
+          "BACKUP_ENABLED", "BACKUP_PATH", "BACKUP_CRON",
+          "BACKUP_MAX_BACKUPS", "BACKUP_INCLUDE_USERDATA", "BACKUP_INCLUDE_MEDIA",
         ];
       default:
         return [];
@@ -3043,6 +2980,8 @@ export function App() {
         return { keys: getAutoSaveKeysForStep("tools"), savedMsg: t("config.toolsSaved") };
       case "agent":
         return { keys: getAutoSaveKeysForStep("agent"), savedMsg: t("config.agentSaved") };
+      case "advanced":
+        return { keys: getAutoSaveKeysForStep("advanced"), savedMsg: t("config.advancedSaved") };
       default:
         return null;
     }
@@ -5256,6 +5195,7 @@ export function App() {
   const _configViewProps = {
     envDraft, setEnvDraft,
     currentWorkspaceId,
+    disabledViews, toggleViewDisabled,
   };
 
   function renderIM(opts?: { onboarding?: boolean }) {
@@ -5328,10 +5268,23 @@ export function App() {
               <label className="inline-flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none" onClick={(e) => e.stopPropagation()}>
                 <span>{disabledViews.includes("mcp") ? t("config.toolsSkillsDisabled") : t("config.toolsSkillsEnabled")}</span>
                 <div
-                  onClick={() => {
+                  onClick={async () => {
                     const willDisable = !disabledViews.includes("mcp");
                     toggleViewDisabled("mcp");
                     setEnvDraft((p) => ({ ...p, MCP_ENABLED: willDisable ? "false" : "true" }));
+                    try {
+                      const entries = { MCP_ENABLED: willDisable ? "false" : "true" };
+                      if (shouldUseHttpApi()) {
+                        await safeFetch(`${httpApiBase()}/api/config/env`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ entries }),
+                        });
+                        notifySuccess(willDisable
+                          ? t("config.mcpDisabledNeedRestart", { defaultValue: "MCP 已禁用，重启后生效" })
+                          : t("config.mcpEnabledNeedRestart", { defaultValue: "MCP 已启用，重启后生效" }));
+                      }
+                    } catch { /* ignore */ }
                   }}
                   className="relative shrink-0 transition-colors duration-200 rounded-full"
                   style={{
@@ -5513,60 +5466,10 @@ export function App() {
   // CliManager -> ./components/CliManager.tsx
 
   function renderAgentSystem() {
-    return <AgentSystemView {..._configViewProps} />;
+    return <AgentSystemView {..._configViewProps} serviceRunning={!!serviceStatus?.running} apiBaseUrl={apiBaseUrl} />;
   }
 
   function renderAdvanced() {
-
-    async function runDiagnose() {
-      if (!venvDir) return;
-      const _b = notifyLoading(t("adv.diagnosing"));
-      try {
-        const d = await invoke<NonNullable<typeof pyDiag>>("diagnose_python_env", { venvDir });
-        setPyDiag(d);
-      } catch (e) { notifyError(String(e)); } finally { dismissLoading(_b); }
-    }
-
-    async function runRepair(forceRebuild = false) {
-      if (!venvDir) return;
-      const _b = notifyLoading(t("adv.repairing"));
-      setRepairStage(""); setRepairPercent(0); setRepairDetail("");
-      const unlisten = await listen("python_repair_event", (ev) => {
-        const p = ev.payload as any;
-        if (!p || typeof p !== "object") return;
-        if (p.stage) setRepairStage(String(p.stage));
-        if (typeof p.percent === "number") setRepairPercent(p.percent);
-        if (p.detail) setRepairDetail(String(p.detail));
-      });
-      try {
-        const d = await invoke<NonNullable<typeof pyDiag>>("repair_python_env", { venvDir, forceRebuild });
-        setPyDiag(d);
-        if (d && d.summary === "healthy") notifySuccess(t("adv.repairDone"));
-        else if (d) notifyError(t("adv.repairPartial"));
-      } catch (e) { notifyError(String(e)); } finally { unlisten(); dismissLoading(_b); setRepairStage(""); }
-    }
-
-    async function runExportDiagReport() {
-      if (!venvDir) return;
-      const _b = notifyLoading(t("adv.diagnosing"));
-      try {
-        const reportPath = await invoke<string>("export_python_diagnostic_report", { venvDir });
-        notifySuccess(t("adv.diagReportExported", { path: reportPath }));
-      } catch (e) {
-        notifyError(String(e));
-      } finally {
-        dismissLoading(_b);
-      }
-    }
-
-    async function runReset(removeVenv: boolean, removeEmbedded: boolean) {
-      const _b = notifyLoading(t("adv.resetting"));
-      try {
-        await invoke<string>("remove_openakita_runtime", { removeVenv: removeVenv, removeEmbeddedPython: removeEmbedded });
-        setPyDiag(null);
-        notifySuccess(t("adv.resetDone"));
-      } catch (e) { notifyError(String(e)); } finally { dismissLoading(_b); }
-    }
 
     async function fetchSystemInfo() {
       const url = shouldUseHttpApi() ? httpApiBase() : null;
@@ -5641,102 +5544,18 @@ export function App() {
       } catch (e) { notifyError(String(e)); } finally { if (_b !== undefined) dismissLoading(_b); }
     }
 
-    async function exportEnv() {
-      if (!currentWorkspaceId || !IS_TAURI) { if (!IS_TAURI) notifyError("Web 模式暂不支持导出 .env"); return; }
-      try {
-        const content = await invoke<string>("workspace_read_file", { workspaceId: currentWorkspaceId, relativePath: ".env" });
-        const blob = new Blob([content], { type: "text/plain" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `openakita-${currentWorkspaceId}.env`;
-        a.click();
-        URL.revokeObjectURL(url);
-        notifySuccess(t("adv.exportDone"));
-      } catch (e) { notifyError(String(e)); }
-    }
-
-    async function importEnv() {
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = ".env,text/plain";
-      input.onchange = async () => {
-        const file = input.files?.[0];
-        if (!file || !currentWorkspaceId) return;
-        try {
-          const text = await file.text();
-          const parsed = parseEnv(text);
-          setEnvDraft((prev) => {
-            let draft = prev;
-            for (const [k, v] of Object.entries(parsed)) {
-              draft = envSet(draft, k, v);
-            }
-            return draft;
-          });
-          notifySuccess(t("adv.importDone", { count: Object.keys(parsed).length }));
-        } catch (e) { notifyError(String(e)); }
-      };
-      input.click();
-    }
-
     // ── Backup functions ──
-
-    async function loadBackupSettings() {
-      const url = shouldUseHttpApi() ? httpApiBase() : null;
-      if (url) {
-        try {
-          const res = await safeFetch(`${url}/api/workspace/backup-settings`, { signal: AbortSignal.timeout(5_000) });
-          const data = await res.json();
-          if (data.settings) {
-            setBackupSettings(data.settings);
-            setBackupSettingsLoaded(true);
-          }
-        } catch { /* backend not available, use defaults */ }
-      } else if (IS_TAURI && currentWorkspaceId) {
-        try {
-          const content = await invoke<string>("workspace_read_file", { workspaceId: currentWorkspaceId, relativePath: "data/backup_settings.json" });
-          const parsed = JSON.parse(content);
-          setBackupSettings((prev) => ({ ...prev, ...parsed }));
-          setBackupSettingsLoaded(true);
-        } catch { /* file doesn't exist yet, use defaults */ }
-      }
-    }
-
-    async function saveBackupSettings() {
-      const url = shouldUseHttpApi() ? httpApiBase() : null;
-      if (url) {
-        try {
-          await safeFetch(`${url}/api/workspace/backup-settings`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(backupSettings),
-            signal: AbortSignal.timeout(5_000),
-          });
-          notifySuccess(t("adv.backupSaved"));
-        } catch (e) { notifyError(String(e)); }
-      } else if (IS_TAURI && currentWorkspaceId) {
-        try {
-          await invoke("workspace_write_file", {
-            workspaceId: currentWorkspaceId,
-            relativePath: "data/backup_settings.json",
-            content: JSON.stringify(backupSettings, null, 2) + "\n",
-          });
-          notifySuccess(t("adv.backupSaved"));
-        } catch (e) { notifyError(String(e)); }
-      }
-    }
 
     async function runBackupNow() {
       if (!currentWorkspaceId) return;
-      let outputDir = backupSettings.backup_path;
+      let outputDir = envGet(envDraft, "BACKUP_PATH");
       if (!outputDir) {
-        // Use dialog to pick folder
         try {
           const { openFileDialog } = await import("./platform");
           const selected = await openFileDialog({ directory: true, title: t("adv.backupPath") });
           if (!selected) return;
           outputDir = selected;
-          setBackupSettings((prev) => ({ ...prev, backup_path: outputDir }));
+          setEnvDraft((prev) => envSet(prev, "BACKUP_PATH", outputDir));
         } catch (e) { notifyError(String(e)); return; }
       }
       const _b = notifyLoading(t("adv.backupExporting"));
@@ -5747,8 +5566,8 @@ export function App() {
           {
             workspaceId: currentWorkspaceId,
             outputDir,
-            includeUserdata: backupSettings.include_userdata,
-            includeMedia: backupSettings.include_media,
+            includeUserdata: envGet(envDraft, "BACKUP_INCLUDE_USERDATA", "true") === "true",
+            includeMedia: envGet(envDraft, "BACKUP_INCLUDE_MEDIA", "false") === "true",
             apiPort,
           }
         );
@@ -5782,7 +5601,7 @@ export function App() {
 
     async function loadBackupHistory() {
       const url = shouldUseHttpApi() ? httpApiBase() : null;
-      if (!url || !backupSettings.backup_path) { setBackupHistory([]); return; }
+      if (!url || !envGet(envDraft, "BACKUP_PATH")) { setBackupHistory([]); return; }
       try {
         const res = await safeFetch(`${url}/api/workspace/backups`, { signal: AbortSignal.timeout(5_000) });
         const data = await res.json();
@@ -5795,242 +5614,61 @@ export function App() {
         const { openFileDialog } = await import("./platform");
         const selected = await openFileDialog({ directory: true, title: t("adv.backupPath") });
         if (selected) {
-          setBackupSettings((prev) => ({ ...prev, backup_path: selected }));
+          setEnvDraft((prev) => envSet(prev, "BACKUP_PATH", selected));
         }
       } catch (e) { notifyError(String(e)); }
     }
 
-    // Load backup settings on first render
-    if (!backupSettingsLoaded) { loadBackupSettings(); }
-
-    const sectionHeader = (key: string, title: string) => (
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 0" }}>
-        <span style={{ fontWeight: 600, fontSize: 14 }}>{title}</span>
-        {advLoading[key] && <span className="spinner" style={{ width: 14, height: 14, flexShrink: 0 }} />}
-      </div>
-    );
-
-    const diagItem = (label: string, status: "pass" | "warn" | "fail" | undefined, detail?: string | null) => (
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", fontSize: 13 }}>
-        <span style={{
-          width: 8,
-          height: 8,
-          borderRadius: "50%",
-          flexShrink: 0,
-          background: status === "pass" ? "#10b981" : status === "warn" ? "#f59e0b" : "#ef4444",
-        }} />
-        <span style={{ fontWeight: 500, minWidth: 140 }}>{label}</span>
-        <span style={{ color: "var(--muted)", fontSize: 12, wordBreak: "break-all" }}>{detail || "—"}</span>
-      </div>
-    );
-
     return (
       <>
-        {/* ── Python 环境诊断 (desktop only) ── */}
-        <div className="card" style={IS_WEB ? { display: "none" } : undefined}>
-          {sectionHeader("python", t("adv.pythonTitle"))}
-            <div style={{ paddingLeft: 22 }}>
-              {pyDiag ? (
-                <>
-                  <div className="cardHint" style={{ marginBottom: 6 }}>
-                    {t("adv.diagSummary")}:{" "}
-                    <b>{{ healthy: t("adv.summaryHealthy"), repairable: t("adv.summaryRepairable"), broken: t("adv.summaryBroken") }[pyDiag.summary]}</b>
-                  </div>
-                  {pyDiag.contracts.map((c) => (
-                    <div key={c.id}>
-                      {diagItem(c.title, c.status, `${c.code}${c.evidence?.[0] ? ` — ${c.evidence[0]}` : ""}`)}
-                    </div>
-                  ))}
-                  {pyDiag.contracts.some((c) => c.status !== "pass") && (
-                    <div style={{ marginTop: 8, padding: "8px 12px", background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 8, fontSize: 12, color: "var(--warning)" }}>
-                      {pyDiag.contracts.filter((c) => c.status !== "pass").map((c) => (
-                        <div key={c.id} style={{ padding: "2px 0" }}>
-                          ⚠ {c.fixHint || c.code}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              ) : advLoading.python ? (
-                <div className="cardHint" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span className="spinner" style={{ width: 14, height: 14 }} />
-                  {t("adv.diagnosing")}
-                </div>
-              ) : (
-                <div className="cardHint">{t("adv.pyNoDiag")}</div>
-              )}
-              {repairStage && (
-                <div style={{ marginTop: 10, padding: "8px 12px", background: "rgba(37,99,235,0.1)", borderRadius: 8, fontSize: 12 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>{repairStage}</div>
-                  <div style={{ width: "100%", height: 6, background: "var(--line)", borderRadius: 3, overflow: "hidden" }}>
-                    <div style={{ width: `${repairPercent}%`, height: "100%", background: "var(--brand, #2563eb)", borderRadius: 3, transition: "width 0.3s" }} />
-                  </div>
-                  {repairDetail && <div style={{ marginTop: 4, color: "var(--muted)" }}>{repairDetail}</div>}
-                </div>
-              )}
-              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-                <button className="btnSmall" onClick={runDiagnose} disabled={!!busy}>{t("adv.diagnose")}</button>
-                <button className="btnSmall" onClick={runExportDiagReport} disabled={!!busy}>{t("adv.exportDiagReport")}</button>
-              </div>
+        {/* ── 系统配置（桌面通知 / 会话 / 日志） ── */}
+        <div className="card">
+          <h3 style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>{t("config.agentAdvanced")}</h3>
+
+          <Section title={t("config.agentDesktopNotify")}>
+            <div className="grid2">
+              {FB({ k: "DESKTOP_NOTIFY_ENABLED", label: t("config.agentDesktopNotifyEnable"), help: t("config.agentDesktopNotifyEnableHelp") })}
+              {FB({ k: "DESKTOP_NOTIFY_SOUND", label: t("config.agentDesktopNotifySound"), help: t("config.agentDesktopNotifySoundHelp") })}
             </div>
+          </Section>
+
+          <Section title={t("config.agentSessionSection")} className="mt-2">
+            <div className="grid3">
+              {FT({ k: "SESSION_TIMEOUT_MINUTES", label: t("config.agentSessionTimeout"), placeholder: "30" })}
+              {FT({ k: "SESSION_MAX_HISTORY", label: t("config.agentSessionMax"), placeholder: "50" })}
+              {FT({ k: "SESSION_STORAGE_PATH", label: t("config.agentSessionPath"), placeholder: "data/sessions" })}
+            </div>
+          </Section>
+
+          <Section title={t("config.agentLogSection")} className="mt-2">
+            <div className="grid3">
+              {FS({ k: "LOG_LEVEL", label: t("config.agentLogLevel"), options: [
+                { value: "DEBUG", label: "DEBUG" },
+                { value: "INFO", label: "INFO" },
+                { value: "WARNING", label: "WARNING" },
+                { value: "ERROR", label: "ERROR" },
+              ] })}
+              {FT({ k: "LOG_DIR", label: t("config.agentLogDir"), placeholder: "logs" })}
+              {FT({ k: "DATABASE_PATH", label: t("config.agentDbPath"), placeholder: "data/agent.db" })}
+            </div>
+            <div className="grid3">
+              {FT({ k: "LOG_MAX_SIZE_MB", label: t("config.agentLogMaxMB"), placeholder: "10" })}
+              {FT({ k: "LOG_BACKUP_COUNT", label: t("config.agentLogBackup"), placeholder: "30" })}
+              {FT({ k: "LOG_RETENTION_DAYS", label: t("config.agentLogRetention"), placeholder: "30" })}
+            </div>
+            <div className="grid3">
+              {FB({ k: "LOG_TO_CONSOLE", label: t("config.agentLogConsole") })}
+              {FB({ k: "LOG_TO_FILE", label: t("config.agentLogFile") })}
+            </div>
+          </Section>
         </div>
 
-        {/* ── 系统信息 ── */}
+        {/* ── Card 2: 网络与安全 ── */}
         <div className="card" style={{ marginTop: 12 }}>
-          {sectionHeader("sysinfo", t("adv.sysTitle"))}
-            <div style={{ paddingLeft: 22 }}>
-              {!advSysInfo ? (
-                advLoading.sysinfo ? (
-                  <div className="cardHint" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span className="spinner" style={{ width: 14, height: 14 }} />
-                    {t("common.loading")}
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <button className="btnSmall" onClick={fetchSystemInfo} disabled={!!busy || !serviceStatus?.running}>{t("adv.sysLoad")}</button>
-                    {!serviceStatus?.running && <span className="cardHint">{t("adv.needService")}</span>}
-                  </div>
-                )
-              ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 16px", fontSize: 13 }}>
-                  {Object.entries(advSysInfo).map(([k, v]) => (
-                    <Fragment key={k}>
-                      <span style={{ fontWeight: 500, color: "var(--muted)" }}>{k}</span>
-                      <span>{v}</span>
-                    </Fragment>
-                  ))}
-                  <span style={{ fontWeight: 500, color: "var(--muted)" }}>Desktop</span>
-                  <span>{desktopVersion}</span>
-                </div>
-              )}
-            </div>
-        </div>
+          <h3 style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>{t("adv.networkSecurityTitle")}</h3>
 
-        {/* ── 系统运维 ── */}
-        {IS_TAURI && (
-        <div className="card" style={{ marginTop: 12 }}>
-          {sectionHeader("ops", t("adv.opsTitle"))}
-          <div style={{ paddingLeft: 22 }}>
-            {/* 路径信息 */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 8, color: "var(--muted)" }}>{t("adv.opsPaths")}</div>
-              <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: "6px 12px", alignItems: "center", fontSize: 13 }}>
-                {opsPathRows.map((row) => (
-                  <Fragment key={row.label}>
-                    <span style={{ fontWeight: 500, whiteSpace: "nowrap" }}>{row.label}</span>
-                    <span style={{ wordBreak: "break-all", color: "var(--muted)", fontSize: 12, fontFamily: "monospace" }}>{row.path || "—"}</span>
-                    <button className="btnSmall" onClick={() => opsOpenFolder(row.path)} disabled={!row.path}>{t("adv.opsOpenFolder")}</button>
-                  </Fragment>
-                ))}
-              </div>
-            </div>
-
-            {/* 环境变量管理 */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 8, color: "var(--muted)" }}>{t("adv.opsEnvManage")}</div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button className="btnSmall" onClick={exportEnv} disabled={!!busy || !currentWorkspaceId}>{t("adv.opsEnvExport")}</button>
-                <button className="btnSmall" onClick={importEnv} disabled={!!busy || !currentWorkspaceId}>{t("adv.opsEnvImport")}</button>
-              </div>
-            </div>
-
-            {/* 诊断日志导出 */}
-            <div>
-              <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 4, color: "var(--muted)" }}>{t("adv.opsLogExport")}</div>
-              <div className="cardHint" style={{ marginBottom: 8 }}>{t("adv.opsLogExportDesc")}</div>
-              <button className="btnSmall" onClick={opsHandleBundleExport} disabled={!!busy || !currentWorkspaceId}>
-                {busy === t("adv.opsLogExporting") ? t("adv.opsLogExporting") : t("adv.opsLogExportBtn")}
-              </button>
-            </div>
-          </div>
-        </div>
-        )}
-
-        {/* ── 平台连接（Agent Hub / Skill Store） ── */}
-        <div className="card" style={{ marginTop: 12 }}>
-          {sectionHeader("hub", t("adv.hubTitle"))}
-          <div style={{ paddingLeft: 22 }}>
-            <div className="cardHint" style={{ marginBottom: 8 }}>{t("adv.hubHint")}</div>
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <input
-                type="text"
-                value={hubApiUrl}
-                onChange={(e) => setHubApiUrl(e.target.value)}
-                placeholder={t("adv.hubUrlPlaceholder")}
-                style={{ flex: 1, maxWidth: 380, fontSize: 12, padding: "6px 10px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--bg)", color: "var(--fg)" }}
-              />
-              <button
-                className="btnSmall btnSmallPrimary"
-                disabled={!!busy}
-                onClick={async () => {
-                  const val = hubApiUrl.trim() || "https://openakita.ai/api";
-                  if (shouldUseHttpApi()) {
-                    try {
-                      await safeFetch(`${httpApiBase()}/api/config/env`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ entries: { HUB_API_URL: val } }),
-                      });
-                      notifySuccess(t("adv.hubSaved"));
-                    } catch (e) { notifyError(String(e)); }
-                  } else {
-                    setEnvDraft((prev) => envSet(prev, "HUB_API_URL", val));
-                    notifySuccess(t("adv.hubSaved"));
-                  }
-                }}
-              >
-                {t("common.save") || "Save"}
-              </button>
-              <button
-                className="btnSmall"
-                disabled={!!busy}
-                onClick={async () => {
-                  const url = (hubApiUrl.trim() || "https://openakita.ai/api").replace(/\/$/, "");
-                  try {
-                    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(6000) });
-                    if (res.ok) notifySuccess(t("adv.hubTestOk"));
-                    else notifyError(t("adv.hubTestFail"));
-                  } catch { notifyError(t("adv.hubTestFail")); }
-                }}
-              >
-                {t("adv.hubTest")}
-              </button>
-            </div>
-
-            {/* Store visibility toggle */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
-              <div>
-                <div style={{ fontSize: 13, color: "var(--fg)" }}>{t("adv.storeToggleLabel")}</div>
-                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{t("adv.storeToggleHint")}</div>
-              </div>
-              <div
-                onClick={() => {
-                  const next = !storeVisible;
-                  setStoreVisible(next);
-                  localStorage.setItem("openakita_storeVisible", String(next));
-                }}
-                style={{
-                  width: 40, height: 22, borderRadius: 11, cursor: "pointer",
-                  background: storeVisible ? "var(--ok)" : "var(--line)",
-                  position: "relative", transition: "background 0.2s", flexShrink: 0,
-                }}
-              >
-                <div style={{
-                  width: 18, height: 18, borderRadius: 9, background: "#fff",
-                  position: "absolute", top: 2,
-                  left: storeVisible ? 20 : 2,
-                  transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-                }} />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Web 访问网络配置 ── */}
-        <div className="card" style={{ marginTop: 12 }}>
-          {sectionHeader("webnet", t("adv.webNetworkTitle", { defaultValue: "Web 访问 / 网络" }))}
-          <div style={{ paddingLeft: 22 }}>
-            <div className="cardHint" style={{ marginBottom: 8 }}>
+          <Section title={t("adv.webNetworkTitle", { defaultValue: "Web 访问" })}>
+            <div className="cardHint" style={{ marginBottom: 4 }}>
               {t("adv.webNetworkHint", { defaultValue: "控制 HTTP API 服务的监听范围和代理设置。修改后需重启后端生效。" })}
             </div>
             <FieldBool k="API_HOST" label={t("adv.apiHostLabel", { defaultValue: "允许外部访问（局域网/公网）" })}
@@ -6052,171 +5690,334 @@ export function App() {
               help={t("adv.trustProxyHelp", { defaultValue: "通过反向代理部署时必须开启。开启后读取 X-Forwarded-For 获取真实 IP，并关闭本地免密。" })}
               envDraft={envDraft} onEnvChange={(fn) => setEnvDraft((prev) => fn(prev))}
             />
-            <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
-              <button className="btnSmall" disabled={!!busy} onClick={async () => {
-                const _b = notifyLoading(t("common.loading"));
-                try {
-                  await saveEnvKeys(["API_HOST", "TRUST_PROXY"]);
-                  notifySuccess(t("adv.webNetworkSaved", { defaultValue: "网络设置已保存，重启后端后生效" }));
-                } catch (e: any) { notifyError(String(e)); }
-                finally { dismissLoading(_b); }
-              }}>{t("common.save", { defaultValue: "保存" })}</button>
-              <span style={{ fontSize: 11, color: "var(--muted)", opacity: 0.7 }}>
-                {t("adv.webNetworkRestartHint", { defaultValue: "保存后需在状态面板重启后端生效" })}
-              </span>
+            <p className="mt-1.5 text-xs text-muted-foreground/70">
+              {t("adv.webNetworkRestartHint", { defaultValue: "保存后需在状态面板重启后端生效" })}
+            </p>
+          </Section>
+
+          {IS_TAURI && !!serviceStatus?.running && dataMode !== "remote" && (
+            <Section title={t("adv.webPasswordTitle")} className="mt-2">
+              <div className="cardHint" style={{ marginBottom: 4 }}>{t("adv.webPasswordHint")}</div>
+              <WebPasswordManager apiBase={httpApiBase()} />
+            </Section>
+          )}
+        </div>
+
+        {/* ── Card 3: 平台与云服务 ── */}
+        <div className="card" style={{ marginTop: 12 }}>
+          <h3 style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>{t("adv.platformTitle")}</h3>
+
+          <Section title={t("adv.hubTitle")}
+            toggle={
+              <Switch
+                checked={storeVisible}
+                onCheckedChange={(v) => { setStoreVisible(v); localStorage.setItem("openakita_storeVisible", String(v)); }}
+              />
+            }
+          >
+            <p className="text-xs text-muted-foreground mb-1">{t("adv.hubHint")}</p>
+            <div className="flex items-center gap-1.5">
+              <Input
+                value={hubApiUrl}
+                onChange={(e) => setHubApiUrl(e.target.value)}
+                placeholder={t("adv.hubUrlPlaceholder")}
+                className="flex-1 max-w-[380px]"
+              />
+              <Button
+                size="sm"
+                disabled={!!busy}
+                onClick={async () => {
+                  const val = hubApiUrl.trim() || "https://openakita.ai/api";
+                  if (shouldUseHttpApi()) {
+                    try {
+                      await safeFetch(`${httpApiBase()}/api/config/env`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ entries: { HUB_API_URL: val } }),
+                      });
+                      notifySuccess(t("adv.hubSaved"));
+                    } catch (e) { notifyError(String(e)); }
+                  } else {
+                    setEnvDraft((prev) => envSet(prev, "HUB_API_URL", val));
+                    notifySuccess(t("adv.hubSaved"));
+                  }
+                }}
+              >
+                {t("common.save") || "Save"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!!busy}
+                onClick={async () => {
+                  const url = (hubApiUrl.trim() || "https://openakita.ai/api").replace(/\/$/, "");
+                  try {
+                    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(6000) });
+                    if (res.ok) notifySuccess(t("adv.hubTestOk"));
+                    else notifyError(t("adv.hubTestFail"));
+                  } catch { notifyError(t("adv.hubTestFail")); }
+                }}
+              >
+                {t("adv.hubTest")}
+              </Button>
             </div>
-          </div>
+          </Section>
         </div>
 
-        {/* ── Web 访问密码管理 (desktop local only, change-password API requires localhost) ── */}
-        {IS_TAURI && !!serviceStatus?.running && dataMode !== "remote" && (
+        {/* ── Card 4: 数据与备份 ── */}
         <div className="card" style={{ marginTop: 12 }}>
-          {sectionHeader("webpw", t("adv.webPasswordTitle"))}
-          <div style={{ paddingLeft: 22 }}>
-            <div className="cardHint" style={{ marginBottom: 8 }}>{t("adv.webPasswordHint")}</div>
-            <WebPasswordManager apiBase={httpApiBase()} />
-          </div>
-        </div>
-        )}
+          <h3 style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>{t("adv.dataBackupTitle")}</h3>
 
-        {/* ── .env 导出/导入（Web 模式保留，Tauri 模式在系统运维卡片中） ── */}
-        {!IS_TAURI && (
-        <div className="card" style={{ marginTop: 12 }}>
-          {sectionHeader("envio", t("adv.export").replace(" .env", "") + " / " + t("adv.import").replace(" .env", "") + " .env")}
-            <div style={{ paddingLeft: 22 }}>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button className="btnSmall" onClick={exportEnv} disabled={!currentWorkspaceId || !!busy}>{t("adv.export")}</button>
-                <button className="btnSmall" onClick={importEnv} disabled={!currentWorkspaceId || !!busy}>{t("adv.import")}</button>
-              </div>
-            </div>
-        </div>
-        )}
-
-        {/* ── 数据备份与恢复 ── */}
-        <div className="card" style={{ marginTop: 12 }}>
-          {sectionHeader("backup", t("adv.backupTitle"))}
-            <div style={{ paddingLeft: 22 }}>
-              <div className="cardHint" style={{ marginBottom: 8 }}>{t("adv.backupHint")}</div>
-
-              {/* 定时备份开关 */}
-              <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "10px 0" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13, whiteSpace: "nowrap" }}>
-                  <input type="checkbox" checked={backupSettings.enabled} onChange={(e) => setBackupSettings((p) => ({ ...p, enabled: e.target.checked }))} style={{ width: 16, height: 16, flexShrink: 0 }} />
-                  {t("adv.backupEnabled")}
-                </label>
-              </div>
-
-              {/* 备份路径 */}
-              <div style={{ margin: "8px 0" }}>
-                <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4, color: "var(--muted)" }}>{t("adv.backupPath")}</div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <input
-                    type="text"
-                    value={backupSettings.backup_path}
-                    onChange={(e) => setBackupSettings((p) => ({ ...p, backup_path: e.target.value }))}
+          <Section title={t("adv.backupAutoTitle")} subtitle={t("adv.backupAutoHint")}
+            toggle={
+              <Switch
+                checked={envGet(envDraft, "BACKUP_ENABLED", "false") === "true"}
+                onCheckedChange={(v) => setEnvDraft((prev) => envSet(prev, "BACKUP_ENABLED", String(v)))}
+              />
+            }
+          >
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">{t("adv.backupPath")}</Label>
+                <div className="flex gap-1.5 items-center">
+                  <Input
+                    value={envGet(envDraft, "BACKUP_PATH")}
+                    onChange={(e) => setEnvDraft((prev) => envSet(prev, "BACKUP_PATH", e.target.value))}
                     placeholder={t("adv.backupPathPlaceholder")}
-                    style={{ flex: 1, fontSize: 12, padding: "6px 10px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--bg)", color: "var(--fg)" }}
+                    className="flex-1"
                   />
-                  <button className="btnSmall" onClick={browseBackupPath} disabled={!!busy}>{t("adv.backupBrowse")}</button>
+                  <Button variant="outline" onClick={browseBackupPath} disabled={!!busy}>{t("adv.backupBrowse")}</Button>
                 </div>
               </div>
 
-              {/* 备份频率 */}
-              {backupSettings.enabled && (
-                <div style={{ margin: "8px 0" }}>
-                  <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4, color: "var(--muted)" }}>{t("adv.backupSchedule")}</div>
-                  <select
-                    value={backupSettings.cron === "0 2 * * *" ? "daily" : backupSettings.cron === "0 2 * * 0" ? "weekly" : "custom"}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v === "daily") setBackupSettings((p) => ({ ...p, cron: "0 2 * * *" }));
-                      else if (v === "weekly") setBackupSettings((p) => ({ ...p, cron: "0 2 * * 0" }));
-                    }}
-                    style={{ fontSize: 12, padding: "6px 10px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--bg)", color: "var(--fg)" }}
-                  >
-                    <option value="daily">{t("adv.backupScheduleDaily")}</option>
-                    <option value="weekly">{t("adv.backupScheduleWeekly")}</option>
-                    <option value="custom">{t("adv.backupScheduleCustom")}</option>
-                  </select>
-                  {backupSettings.cron !== "0 2 * * *" && backupSettings.cron !== "0 2 * * 0" && (
-                    <input
-                      type="text"
-                      value={backupSettings.cron}
-                      onChange={(e) => setBackupSettings((p) => ({ ...p, cron: e.target.value }))}
-                      style={{ marginLeft: 8, fontSize: 12, padding: "6px 10px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--bg)", color: "var(--fg)", width: 140 }}
-                    />
-                  )}
-                </div>
-              )}
-
-              {/* 保留备份数 */}
-              <div style={{ margin: "8px 0" }}>
-                <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4, color: "var(--muted)" }}>{t("adv.backupMaxKeep")}</div>
-                <input
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">{t("adv.backupMaxKeep")}</Label>
+                <Input
                   type="number"
                   min={1} max={100}
-                  value={backupSettings.max_backups}
-                  onChange={(e) => setBackupSettings((p) => ({ ...p, max_backups: Math.max(1, parseInt(e.target.value) || 5) }))}
-                  style={{ fontSize: 12, padding: "6px 10px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--bg)", color: "var(--fg)", width: 80 }}
+                  value={envGet(envDraft, "BACKUP_MAX_BACKUPS", "5")}
+                  onChange={(e) => setEnvDraft((prev) => envSet(prev, "BACKUP_MAX_BACKUPS", String(Math.max(1, parseInt(e.target.value) || 5))))}
+                  className="w-20"
                 />
               </div>
 
-              {/* 数据选项 */}
-              <div style={{ display: "flex", gap: 16, margin: "10px 0", flexWrap: "wrap" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13, whiteSpace: "nowrap" }}>
-                  <input type="checkbox" checked={backupSettings.include_userdata} onChange={(e) => setBackupSettings((p) => ({ ...p, include_userdata: e.target.checked }))} style={{ width: 16, height: 16, flexShrink: 0 }} />
-                  {t("adv.backupIncludeUserdata")}
-                </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13, whiteSpace: "nowrap" }}>
-                  <input type="checkbox" checked={backupSettings.include_media} onChange={(e) => setBackupSettings((p) => ({ ...p, include_media: e.target.checked }))} style={{ width: 16, height: 16, flexShrink: 0 }} />
-                  {t("adv.backupIncludeMedia")}
-                </label>
-              </div>
-
-              {/* 操作按钮 */}
-              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-                <button className="btnSmall btnSmallPrimary" onClick={async () => { await saveBackupSettings(); }} disabled={!!busy}>
-                  {t("common.save") || "保存设置"}
-                </button>
-                {IS_TAURI && <button className="btnSmall" onClick={runBackupNow} disabled={!currentWorkspaceId || !!busy}>
-                  {t("adv.backupNow")}
-                </button>}
-                {IS_TAURI && <button className="btnSmall" onClick={runBackupImport} disabled={!currentWorkspaceId || !!busy}>
-                  {t("adv.backupImport")}
-                </button>}
-              </div>
-
-              {/* 历史备份列表 */}
-              {backupSettings.backup_path && (
-                <div style={{ marginTop: 14 }}>
-                  <div
-                    style={{ fontSize: 13, fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}
-                    onClick={() => { setBackupShowHistory((p) => !p); if (!backupShowHistory) loadBackupHistory(); }}
-                  >
-                    <span style={{ transform: backupShowHistory ? "rotate(90deg)" : "rotate(0)", transition: "transform 0.15s", display: "inline-block" }}>▸</span>
-                    {t("adv.backupHistory")}
+              {envGet(envDraft, "BACKUP_ENABLED", "false") === "true" && (
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">{t("adv.backupSchedule")}</Label>
+                  <div className="flex items-center gap-2">
+                    {(() => {
+                      const cron = envGet(envDraft, "BACKUP_CRON", "0 2 * * *");
+                      const schedVal = cron === "0 2 * * *" ? "daily" : cron === "0 2 * * 0" ? "weekly" : "custom";
+                      return (
+                        <>
+                          <Select
+                            value={schedVal}
+                            onValueChange={(v) => {
+                              if (v === "daily") setEnvDraft((prev) => envSet(prev, "BACKUP_CRON", "0 2 * * *"));
+                              else if (v === "weekly") setEnvDraft((prev) => envSet(prev, "BACKUP_CRON", "0 2 * * 0"));
+                            }}
+                          >
+                            <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="daily">{t("adv.backupScheduleDaily")}</SelectItem>
+                              <SelectItem value="weekly">{t("adv.backupScheduleWeekly")}</SelectItem>
+                              <SelectItem value="custom">{t("adv.backupScheduleCustom")}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {schedVal === "custom" && (
+                            <Input
+                              value={cron}
+                              onChange={(e) => setEnvDraft((prev) => envSet(prev, "BACKUP_CRON", e.target.value))}
+                              className="w-[140px]"
+                            />
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
-                  {backupShowHistory && (
-                    <div style={{ marginTop: 6 }}>
-                      {backupHistory.length === 0 ? (
-                        <div className="cardHint" style={{ fontSize: 12 }}>{t("adv.backupNoHistory")}</div>
-                      ) : (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          {backupHistory.map((b) => (
-                            <div key={b.filename} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "4px 8px", borderRadius: 6, background: "var(--bg)" }}>
-                              <span style={{ fontFamily: "monospace" }}>{b.filename}</span>
-                              <span style={{ color: "var(--muted)", whiteSpace: "nowrap", marginLeft: 12 }}>
-                                {(b.size_bytes / 1024 / 1024).toFixed(1)} MB
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
               )}
+
+              <div className="flex gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="backup-userdata"
+                    checked={envGet(envDraft, "BACKUP_INCLUDE_USERDATA", "true") === "true"}
+                    onCheckedChange={(v) => setEnvDraft((prev) => envSet(prev, "BACKUP_INCLUDE_USERDATA", String(!!v)))}
+                  />
+                  <Label htmlFor="backup-userdata" className="cursor-pointer">{t("adv.backupIncludeUserdata")}</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="backup-media"
+                    checked={envGet(envDraft, "BACKUP_INCLUDE_MEDIA", "false") === "true"}
+                    onCheckedChange={(v) => setEnvDraft((prev) => envSet(prev, "BACKUP_INCLUDE_MEDIA", String(!!v)))}
+                  />
+                  <Label htmlFor="backup-media" className="cursor-pointer">{t("adv.backupIncludeMedia")}</Label>
+                </div>
+              </div>
             </div>
+          </Section>
+
+          {IS_TAURI && (
+            <Section title={t("adv.backupManualTitle")} subtitle={t("adv.backupManualHint")} className="mt-2">
+              <div className="space-y-3">
+                <div className="flex gap-2 flex-wrap">
+                  <Button variant="outline" size="sm" onClick={runBackupNow} disabled={!currentWorkspaceId || !!busy}>
+                    {t("adv.backupNow")}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={runBackupImport} disabled={!currentWorkspaceId || !!busy}>
+                    {t("adv.backupRestore")}
+                  </Button>
+                </div>
+
+                {envGet(envDraft, "BACKUP_PATH") && (
+                  <div>
+                    <div
+                      className="text-sm font-medium cursor-pointer flex items-center gap-1"
+                      onClick={() => { setBackupShowHistory((p) => !p); if (!backupShowHistory) loadBackupHistory(); }}
+                    >
+                      <span className="inline-block transition-transform duration-150" style={{ transform: backupShowHistory ? "rotate(90deg)" : "rotate(0)" }}>▸</span>
+                      {t("adv.backupHistory")}
+                    </div>
+                    {backupShowHistory && (
+                      <div className="mt-1.5">
+                        {backupHistory.length === 0 ? (
+                          <p className="text-xs text-muted-foreground">{t("adv.backupNoHistory")}</p>
+                        ) : (
+                          <div className="flex flex-col gap-1">
+                            {backupHistory.map((b) => (
+                              <div key={b.filename} className="flex justify-between items-center text-xs py-1 px-2 rounded-md bg-muted/30">
+                                <span className="font-mono">{b.filename}</span>
+                                <span className="text-muted-foreground whitespace-nowrap ml-3">
+                                  {(b.size_bytes / 1024 / 1024).toFixed(1)} MB
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </Section>
+          )}
+        </div>
+
+        {/* ── Card 5: 系统信息与运维 ── */}
+        <div className="card" style={{ marginTop: 12 }}>
+          <h3 style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>{t("adv.sysOpsTitle")}</h3>
+
+          <Section title={t("adv.sysTitle")}
+            toggle={IS_TAURI ? (
+              <Button variant="outline" size="xs" onClick={(e) => { e.preventDefault(); opsHandleBundleExport(); }} disabled={!!busy || !currentWorkspaceId}>
+                {busy === t("adv.opsLogExporting") ? t("adv.opsLogExporting") : t("adv.exportDiagBtn")}
+              </Button>
+            ) : undefined}
+          >
+            {!advSysInfo ? (
+              advLoading.sysinfo ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span className="spinner size-3.5" />
+                  {t("common.loading")}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={fetchSystemInfo} disabled={!!busy || !serviceStatus?.running}>{t("adv.sysLoad")}</Button>
+                  {!serviceStatus?.running && <span className="text-xs text-muted-foreground">{t("adv.needService")}</span>}
+                </div>
+              )
+            ) : (
+              <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+                {Object.entries(advSysInfo).map(([k, v]) => (
+                  <Fragment key={k}>
+                    <span className="font-medium text-muted-foreground">{k}</span>
+                    <span>{v}</span>
+                  </Fragment>
+                ))}
+                <span className="font-medium text-muted-foreground">Desktop</span>
+                <span>{desktopVersion}</span>
+              </div>
+            )}
+          </Section>
+
+          {IS_TAURI && (
+            <Section title={t("adv.opsPaths")} className="mt-2">
+              <div className="grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-1.5 items-center text-sm">
+                {opsPathRows.map((row) => (
+                  <Fragment key={row.label}>
+                    <span className="font-medium whitespace-nowrap">{row.label}</span>
+                    <span className="break-all text-muted-foreground text-xs font-mono">{row.path || "—"}</span>
+                    <Button variant="outline" size="xs" onClick={() => opsOpenFolder(row.path)} disabled={!row.path}>{t("adv.opsOpenFolder")}</Button>
+                  </Fragment>
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {IS_TAURI && (
+            <Section title={t("adv.factoryResetTitle")} subtitle={t("adv.factoryResetSubtitle")} className="mt-2">
+              <p className="text-xs text-muted-foreground mb-2">{t("adv.factoryResetDesc")}</p>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => { setFactoryResetConfirmText(""); setFactoryResetOpen(true); }}
+                disabled={!!busy}
+              >
+                {t("adv.factoryResetBtn")}
+              </Button>
+            </Section>
+          )}
+
+          <AlertDialog open={factoryResetOpen} onOpenChange={(open) => { if (!open) setFactoryResetOpen(false); }}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{t("adv.factoryResetConfirmTitle")}</AlertDialogTitle>
+                <AlertDialogDescription className="space-y-2" asChild>
+                  <div>
+                    <p>{t("adv.factoryResetConfirmDesc")}</p>
+                    <ul className="list-disc pl-5 text-sm space-y-0.5">
+                      <li>{t("adv.factoryResetItem1")}</li>
+                      <li>{t("adv.factoryResetItem2")}</li>
+                      <li>{t("adv.factoryResetItem3")}</li>
+                      <li>{t("adv.factoryResetItem4")}</li>
+                    </ul>
+                    <p className="font-medium mt-2">{t("adv.factoryResetTypeHint")}</p>
+                    <Input
+                      value={factoryResetConfirmText}
+                      onChange={(e) => setFactoryResetConfirmText(e.target.value)}
+                      placeholder="RESET"
+                      className="mt-1"
+                      autoFocus
+                    />
+                  </div>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+                <AlertDialogAction
+                  variant="destructive"
+                  disabled={factoryResetConfirmText !== "RESET"}
+                  onClick={async () => {
+                    setFactoryResetOpen(false);
+                    const _b = notifyLoading(t("adv.factoryResetInProgress"));
+                    try {
+                      const result = await invoke<string>("factory_reset");
+                      dismissLoading(_b);
+                      notifySuccess(result);
+                      setTimeout(() => { setView("onboarding"); window.location.reload(); }, 1500);
+                    } catch (e) {
+                      dismissLoading(_b);
+                      notifyError(String(e));
+                    }
+                  }}
+                >
+                  {t("adv.factoryResetConfirmBtn")}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </>
     );
@@ -6684,7 +6485,7 @@ export function App() {
 
           <div className="card">
             <div className="cardTitle" style={{ fontSize: 14, marginBottom: 6 }}>
-              Agent 与系统（核心配置）
+              灵魂与意志（核心配置）
             </div>
             <div className="cardHint">
               这些是系统内置能力的开关与参数。<b>内置项默认启用</b>（你随时可以关闭）。建议先用默认值跑通，再按需调优。
@@ -7888,31 +7689,21 @@ export function App() {
       );
     }
     if (view === "scheduler") {
-      return (
-        <div>
-          {_disableToggle("scheduler", t("scheduler.title"))}
-          {disabledViews.includes("scheduler") ? (
-            <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
-              <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，点击上方开关启用</p>
-            </div>
-          ) : (
-            <SchedulerView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
-          )}
+      return disabledViews.includes("scheduler") ? (
+        <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
+          <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，请在「灵魂与意志」配置中启用</p>
         </div>
+      ) : (
+        <SchedulerView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
       );
     }
     if (view === "memory") {
-      return (
-        <div>
-          {_disableToggle("memory", t("sidebar.memory"))}
-          {disabledViews.includes("memory") ? (
-            <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
-              <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，点击上方开关启用</p>
-            </div>
-          ) : (
-            <MemoryView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
-          )}
+      return disabledViews.includes("memory") ? (
+        <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
+          <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，请在「灵魂与意志」配置中启用</p>
         </div>
+      ) : (
+        <MemoryView serviceRunning={serviceStatus?.running ?? false} apiBaseUrl={apiBaseUrl} />
       );
     }
     if (view === "identity") {

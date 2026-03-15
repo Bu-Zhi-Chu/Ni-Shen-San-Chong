@@ -139,22 +139,19 @@ class OpenAIProvider(LLMProvider):
                 if api_key_for_hook and "Authorization" not in request.headers:
                     request.headers["Authorization"] = f"Bearer {api_key_for_hook}"
 
+            # trust_env=False: 代理由 get_proxy_config() 显式管理（含可达性验证）。
+            # 避免 macOS/Windows 残留系统代理（Clash/V2Ray 等）导致请求被路由到
+            # 不存在的代理端口而失败。
             client_kwargs = {
                 "timeout": build_httpx_timeout(timeout_value, default=60.0),
                 "follow_redirects": True,
+                "trust_env": False,
                 "event_hooks": {"request": [_ensure_auth_on_redirect]},
             }
 
             if proxy and not is_local:
                 client_kwargs["proxy"] = proxy
                 logger.debug(f"[OpenAI] Using proxy: {proxy}")
-
-            if is_local:
-                # Windows 注册表中可能残留代理设置（Clash / V2Ray 等工具修改
-                # IE 代理后关闭，不一定清除注册表）。httpx 默认 trust_env=True
-                # 会通过 getproxies() 读取这些设置，导致 localhost 请求被路由到
-                # 不存在的代理端口而失败。本地端点必须禁用此行为。
-                client_kwargs["trust_env"] = False
 
             if transport:
                 client_kwargs["transport"] = transport
@@ -222,7 +219,6 @@ class OpenAIProvider(LLMProvider):
             response = await client.post(
                 f"{self.base_url}/chat/completions",
                 headers=self._build_headers(),
-                auth=self._get_auth(),
                 json=body,
                 **({"timeout": req_timeout} if req_timeout else {}),
             )
@@ -302,7 +298,6 @@ class OpenAIProvider(LLMProvider):
                 "POST",
                 f"{self.base_url}/chat/completions",
                 headers=self._build_headers(),
-                auth=self._get_auth(),
                 json=body,
                 **({"timeout": req_timeout} if req_timeout else {}),
             ) as response:
@@ -400,9 +395,23 @@ class OpenAIProvider(LLMProvider):
         return _BearerAuth(api_key)
 
     def _build_headers(self) -> dict:
-        """构建请求头（Authorization 由 _get_auth 处理，此处不包含）"""
+        """构建请求头（含 Authorization，不依赖 httpx auth 机制）"""
+        api_key = (self.api_key or "").strip()
+        if not api_key:
+            if self._is_local_endpoint():
+                api_key = "local"
+            else:
+                hint = ""
+                if self.config.api_key_env:
+                    hint = f" (env var {self.config.api_key_env} is not set)"
+                raise AuthenticationError(
+                    f"Missing API key for endpoint '{self.name}'{hint}. "
+                    "Set the environment variable or configure api_key/api_key_env."
+                )
+
         headers: dict[str, str] = {
             "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
         }
 
         if "openrouter" in self.base_url.lower():
