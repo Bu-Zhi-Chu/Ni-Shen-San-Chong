@@ -2,7 +2,7 @@ import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, u
 import { useTranslation } from "react-i18next";
 import { invoke, listen, IS_TAURI, IS_WEB, IS_CAPACITOR, getAppVersion, onWsEvent, reconnectWsNow, logger, openExternalUrl } from "./platform";
 import { getActiveServer, getActiveServerId } from "./platform/servers";
-import { checkAuth, installFetchInterceptor, AUTH_EXPIRED_EVENT, isPasswordUserSet, logout, clearAccessToken, setTauriRemoteMode, isTauriRemoteMode } from "./platform/auth";
+import { checkAuth, tryRestoreLocalAuth, installFetchInterceptor, AUTH_EXPIRED_EVENT, isPasswordUserSet, logout, clearAccessToken, setTauriRemoteMode, isTauriRemoteMode } from "./platform/auth";
 import { LoginView } from "./views/LoginView";
 import { ServerManagerView } from "./views/ServerManagerView";
 import { ChatView } from "./views/ChatView";
@@ -114,8 +114,10 @@ export function App() {
 
   // ── Web / Capacitor auth gate ──
   const needsRemoteAuth = IS_WEB || IS_CAPACITOR;
-  const [webAuthed, setWebAuthed] = useState(!needsRemoteAuth);
-  const [authChecking, setAuthChecking] = useState(needsRemoteAuth);
+  // Restore local-auth mode from sessionStorage so page refresh is instant
+  const cachedLocalAuth = needsRemoteAuth && !IS_CAPACITOR && tryRestoreLocalAuth();
+  const [webAuthed, setWebAuthed] = useState(!needsRemoteAuth || cachedLocalAuth);
+  const [authChecking, setAuthChecking] = useState(needsRemoteAuth && !cachedLocalAuth);
   const [showPwBanner, setShowPwBanner] = useState(false);
   const [showServerManager, setShowServerManager] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
@@ -131,6 +133,9 @@ export function App() {
       setAuthChecking(false);
       return;
     }
+    // If we restored local auth from cache, install interceptor immediately
+    // and still re-validate in background (if check fails, redirect to login)
+    if (cachedLocalAuth) installFetchInterceptor();
     checkAuth(IS_CAPACITOR ? (getActiveServer()?.url || "") : "").then((ok) => {
       if (ok) {
         installFetchInterceptor();
