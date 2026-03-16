@@ -1662,7 +1662,7 @@ export function App() {
     setCapSelected(list.length ? list : ["text"]);
   }, [selectedModelId, models, capTouched]);
 
-  async function loadSavedEndpoints() {
+  async function loadSavedEndpoints(skipAutoFix = false) {
     if (!currentWorkspaceId && dataMode !== "remote") {
       setSavedEndpoints([]);
       setSavedCompilerEndpoints([]);
@@ -1746,6 +1746,78 @@ export function App() {
         }))
         .sort((a: EndpointDraft, b: EndpointDraft) => a.priority - b.priority);
       setSavedSttEndpoints(sttEps);
+
+      // Auto-fix: detect endpoints sharing the same api_key_env.
+      // When two endpoints share one env var, editing either one overwrites the
+      // other's API key.  Rename duplicates to unique names and persist.
+      // IMPORTANT: operate on the RAW parsed JSON arrays to preserve all fields
+      // (extra_params, pricing_tiers, etc.) that EndpointDraft doesn't carry.
+      // skipAutoFix prevents infinite recursion when the recursive reload follows a fix.
+      if (skipAutoFix) return;
+      const rawLists = [
+        Array.isArray(parsed?.endpoints) ? parsed.endpoints : [],
+        Array.isArray(parsed?.compiler_endpoints) ? parsed.compiler_endpoints : [],
+        Array.isArray(parsed?.stt_endpoints) ? parsed.stt_endpoints : [],
+      ];
+      const usedKeys = new Set<string>();
+      let envFixNeeded = false;
+      const envCopies: Record<string, string> = {};
+      for (const rawArr of rawLists) {
+        for (const rawEp of rawArr) {
+          const key = String(rawEp?.api_key_env || "");
+          if (!key) continue;
+          if (usedKeys.has(key)) {
+            const newKey = nextEnvKeyName(key, usedKeys);
+            envCopies[newKey] = key;
+            rawEp.api_key_env = newKey;
+            envFixNeeded = true;
+          }
+          usedKeys.add(rawEp.api_key_env);
+        }
+      }
+
+      if (envFixNeeded) {
+        // Persist the renamed config — writes raw JSON so all fields are preserved
+        try {
+          await writeWorkspaceFile("data/llm_endpoints.json", JSON.stringify(parsed, null, 2) + "\n");
+        } catch { /* best-effort */ }
+
+        // Copy env values from the original key to the new key so the endpoint
+        // keeps working with whichever value was last written.
+        const freshEnv = await ensureEnvLoaded(currentWorkspaceId || "__remote__");
+        const copyEntries: Record<string, string> = {};
+        for (const [newKey, origKey] of Object.entries(envCopies)) {
+          const val = envGet(freshEnv, origKey) || "";
+          if (val) {
+            copyEntries[newKey] = val;
+            setEnvDraft((e) => envSet(e, newKey, val));
+          }
+        }
+        if (Object.keys(copyEntries).length > 0) {
+          try {
+            if (shouldUseHttpApi()) {
+              await safeFetch(`${httpApiBase()}/api/config/env`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ entries: copyEntries }),
+              });
+            } else if (IS_TAURI && currentWorkspaceId) {
+              await invoke("workspace_update_env", {
+                workspaceId: currentWorkspaceId,
+                entries: Object.entries(copyEntries).map(([key, value]) => ({ key, value })),
+              });
+            }
+          } catch { /* best-effort */ }
+        }
+
+        // Reload to reflect the fixed env key names in EndpointDraft state
+        await loadSavedEndpoints(/* skipAutoFix */ true);
+
+        notifyError(
+          "检测到多个端点共用相同的 API Key 环境变量名，已自动修复。"
+          + "如果两个端点使用不同的 API Key，请编辑端点重新填写。",
+        );
+      }
     } catch {
       setSavedEndpoints([]);
       setSavedCompilerEndpoints([]);
@@ -2172,10 +2244,13 @@ export function App() {
     }
     const compilerSelectedProvider = providers.find((p) => p.slug === compilerProviderSlug) || null;
     const isCompilerLocal = isLocalProvider(compilerSelectedProvider);
-    // apiKeyEnv 兜底：即使用户没有手动编辑也能生成合理的环境变量名
-    const effectiveCompApiKeyEnv = compilerApiKeyEnv.trim()
+    const rawCompApiKeyEnv = compilerApiKeyEnv.trim()
       || compilerSelectedProvider?.api_key_env_suggestion
       || envKeyFromSlug(compilerProviderSlug || "custom");
+    const effectiveCompApiKeyEnv = nextEnvKeyName(
+      rawCompApiKeyEnv,
+      new Set([...savedEndpoints, ...savedCompilerEndpoints].map((e) => e.api_key_env).filter(Boolean)),
+    );
     const effectiveCompApiKeyValue = compilerApiKeyValue.trim() || (isCompilerLocal ? localProviderPlaceholderKey(compilerSelectedProvider) : "");
     if (!isCompilerLocal && !effectiveCompApiKeyValue) {
       notifyError("请填写编译端点的 API Key 值");
@@ -2308,9 +2383,13 @@ export function App() {
     }
     const sttSelectedProvider = providers.find((p) => p.slug === sttProviderSlug) || null;
     const isSttLocal = isLocalProvider(sttSelectedProvider);
-    const effectiveSttApiKeyEnv = sttApiKeyEnv.trim()
+    const rawSttApiKeyEnv = sttApiKeyEnv.trim()
       || sttSelectedProvider?.api_key_env_suggestion
       || envKeyFromSlug(sttProviderSlug || "custom");
+    const effectiveSttApiKeyEnv = nextEnvKeyName(
+      rawSttApiKeyEnv,
+      new Set([...savedEndpoints, ...savedCompilerEndpoints, ...savedSttEndpoints].map((e) => e.api_key_env).filter(Boolean)),
+    );
     const effectiveSttApiKeyValue = sttApiKeyValue.trim() || (isSttLocal ? localProviderPlaceholderKey(sttSelectedProvider) : "");
     if (!isSttLocal && !effectiveSttApiKeyValue) {
       notifyError("请填写 STT 端点的 API Key 值");
@@ -2678,9 +2757,14 @@ export function App() {
     // 本地服务商允许空 API Key（自动填入 placeholder）
     const effectiveApiKeyValue = apiKeyValue.trim() || (isLocal ? localProviderPlaceholderKey(selectedProvider) : "");
     // apiKeyEnv 兜底：即使 useEffect 未触发也能生成合理的环境变量名
-    const effectiveApiKeyEnv = apiKeyEnv.trim()
+    // When creating (not editing), deduplicate against existing endpoints to avoid
+    // two endpoints sharing the same env var (which causes key overwrite on save).
+    const rawApiKeyEnv = apiKeyEnv.trim()
       || selectedProvider?.api_key_env_suggestion
       || envKeyFromSlug(selectedProvider?.slug || providerSlug || "custom");
+    const effectiveApiKeyEnv = isEditingEndpoint
+      ? rawApiKeyEnv
+      : nextEnvKeyName(rawApiKeyEnv, new Set(savedEndpoints.map((e) => e.api_key_env).filter(Boolean)));
     if (!isLocal && !effectiveApiKeyValue) {
       notifyError("请填写 API Key 值（会写入工作区 .env）");
       return false;
