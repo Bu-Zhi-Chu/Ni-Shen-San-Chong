@@ -2956,6 +2956,20 @@ class ReasoningEngine:
             except Exception as e:
                 logger.debug(f"[_parse_decision] Thinking tool-call check failed: {e}")
 
+        # 防御层：剥离 text_content 末尾的裸工具名。
+        # 部分模型会在 content 中输出 "用户原文\nbrowser_open" 这类垃圾，
+        # 其中裸工具名既不是合法工具调用（无参数/格式），也不是有意义的回复。
+        # 仅在 text_content 较短（<200 字符）时触发，避免误伤正常长文本。
+        if text_content and len(text_content.strip()) < 200:
+            import re
+            _lines = text_content.strip().split("\n")
+            _last = _lines[-1].strip() if _lines else ""
+            if re.match(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$", _last):
+                text_content = "\n".join(_lines[:-1]).strip()
+                logger.warning(
+                    f"[_parse_decision] Stripped bare tool name '{_last}' from text_content"
+                )
+
         decision_type = DecisionType.TOOL_CALLS if tool_calls else DecisionType.FINAL_ANSWER
 
         return Decision(
