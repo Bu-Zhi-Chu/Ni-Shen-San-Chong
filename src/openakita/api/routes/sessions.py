@@ -31,7 +31,7 @@ async def list_sessions(request: Request, channel: str = "desktop"):
     session_manager = getattr(request.app.state, "session_manager", None)
     if not session_manager:
         wac = getattr(request.app.state, "web_access_config", None)
-        return {"sessions": [], "data_epoch": wac.data_epoch if wac else ""}
+        return {"sessions": [], "data_epoch": wac.data_epoch if wac else "", "ready": False}
 
     sessions = session_manager.list_sessions(channel=channel)
     sessions.sort(key=lambda s: s.last_active, reverse=True)
@@ -66,7 +66,7 @@ async def list_sessions(request: Request, channel: str = "desktop"):
     if wac:
         data_epoch = wac.data_epoch
 
-    return {"sessions": result, "data_epoch": data_epoch}
+    return {"sessions": result, "data_epoch": data_epoch, "ready": True}
 
 
 @router.get("/api/sessions/{conversation_id}/history")

@@ -2240,12 +2240,17 @@ export function ChatView({
         const backendSessions: { id: string; title: string; lastMessage: string; timestamp: number; messageCount: number; agentProfileId?: string }[] = data.sessions || [];
         if (cancelled) return;
 
-        // Detect factory reset via data_epoch: if the backend's epoch changed,
-        // its data/ directory was recreated (factory reset or fresh install).
-        // Clear all stale local conversations so the web client stays in sync.
+        // ── Factory reset / data wipe detection ──
+        // Two complementary checks:
+        // 1) data_epoch mismatch: backend's data/ was recreated (epoch changed)
+        // 2) ready + 0 sessions: backend is fully initialized but has nothing —
+        //    local conversations are orphaned (handles bootstrap: first time the
+        //    epoch code runs, cached is null so #1 cannot fire).
+        const backendReady = data.ready !== false;
         const epoch = data.data_epoch as string | undefined;
+        const EPOCH_KEY = "openakita_data_epoch";
+
         if (epoch) {
-          const EPOCH_KEY = "openakita_data_epoch";
           const cached = localStorage.getItem(EPOCH_KEY);
           localStorage.setItem(EPOCH_KEY, epoch);
           if (cached && cached !== epoch) {
@@ -2261,6 +2266,18 @@ export function ChatView({
           }
         }
 
+        if (backendReady && backendSessions.length === 0) {
+          setConversations((prev) => {
+            if (prev.length === 0) return prev;
+            for (const c of prev) {
+              try { localStorage.removeItem(STORAGE_KEY_MSGS_PREFIX + c.id); } catch {}
+            }
+            return [];
+          });
+          setActiveConvId(null);
+          setMessages([]);
+          return;
+        }
         if (backendSessions.length === 0) return;
 
         const restoredConvs: ChatConversation[] = backendSessions.map((s) => ({
