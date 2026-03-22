@@ -1394,6 +1394,8 @@ export function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, ven
 
   const streamingEnabled = editingBot.credentials.streaming_enabled === "true" || editingBot.credentials.streaming_enabled === true;
   const groupStreamingEnabled = editingBot.credentials.group_streaming === "true" || editingBot.credentials.group_streaming === true;
+  const footerElapsed = editingBot.credentials.footer_elapsed !== "false" && editingBot.credentials.footer_elapsed !== false;
+  const footerStatus = editingBot.credentials.footer_status !== "false" && editingBot.credentials.footer_status !== false;
 
   return (
     <div className="p-5 relative">
@@ -1737,18 +1739,39 @@ export function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, ven
                     ))}
                   </div>
                 </details>
+
+                <div className="space-y-1.5">
+                  <Label>{t("telegram.footerTitle")}</Label>
+                  <label className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer select-none">
+                    <span className="text-sm">{t("telegram.footerElapsed")}</span>
+                    <Switch checked={footerElapsed} onCheckedChange={(v) => updateCredential("footer_elapsed", v ? "true" : "false")} />
+                  </label>
+                  <label className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer select-none">
+                    <span className="text-sm">{t("telegram.footerStatus")}</span>
+                    <Switch checked={footerStatus} onCheckedChange={(v) => updateCredential("footer_status", v ? "true" : "false")} />
+                  </label>
+                </div>
               </div>
             )}
 
             {/* QQ Bot extras */}
             {editingBot.type === "qqbot" && (
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <Checkbox
-                  checked={editingBot.credentials.sandbox === "true" || editingBot.credentials.sandbox === true}
-                  onCheckedChange={(v) => updateCredential("sandbox", v ? "true" : "false")}
-                />
-                <span className="text-sm">{t("config.imQQBotSandbox")}</span>
-              </label>
+              <div className="space-y-3">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <Checkbox
+                    checked={editingBot.credentials.sandbox === "true" || editingBot.credentials.sandbox === true}
+                    onCheckedChange={(v) => updateCredential("sandbox", v ? "true" : "false")}
+                  />
+                  <span className="text-sm">{t("config.imQQBotSandbox")}</span>
+                </label>
+                <div className="space-y-1.5">
+                  <Label>{t("qqbot.footerTitle")}</Label>
+                  <label className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer select-none">
+                    <span className="text-sm">{t("qqbot.footerElapsed")}</span>
+                    <Switch checked={footerElapsed} onCheckedChange={(v) => updateCredential("footer_elapsed", v ? "true" : "false")} />
+                  </label>
+                </div>
+              </div>
             )}
 
             {/* Feishu extras */}
@@ -1782,6 +1805,49 @@ export function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, ven
                   {(editingBot.credentials.group_response_mode === "smart" || editingBot.credentials.group_response_mode === "always") && (
                     <p className="text-[11px] text-amber-600 dark:text-amber-400 leading-relaxed">{t("feishu.groupModeHint")}</p>
                   )}
+                </div>
+                <div className="space-y-1.5">
+                  <Label>{t("feishu.footerTitle")}</Label>
+                  <label className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer select-none">
+                    <span className="text-sm">{t("feishu.footerElapsed")}</span>
+                    <Switch checked={footerElapsed} onCheckedChange={(v) => updateCredential("footer_elapsed", v ? "true" : "false")} />
+                  </label>
+                  <label className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer select-none">
+                    <span className="text-sm">{t("feishu.footerStatus")}</span>
+                    <Switch checked={footerStatus} onCheckedChange={(v) => updateCredential("footer_status", v ? "true" : "false")} />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* DingTalk extras */}
+            {editingBot.type === "dingtalk" && (
+              <div className="space-y-4">
+                <div className="border-t" />
+                <div className="space-y-1.5">
+                  <Label>{t("dingtalk.footerTitle")}</Label>
+                  <label className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer select-none">
+                    <span className="text-sm">{t("dingtalk.footerElapsed")}</span>
+                    <Switch checked={footerElapsed} onCheckedChange={(v) => updateCredential("footer_elapsed", v ? "true" : "false")} />
+                  </label>
+                  <label className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer select-none">
+                    <span className="text-sm">{t("dingtalk.footerStatus")}</span>
+                    <Switch checked={footerStatus} onCheckedChange={(v) => updateCredential("footer_status", v ? "true" : "false")} />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* WeChat extras */}
+            {editingBot.type === "wechat" && (
+              <div className="space-y-4">
+                <div className="border-t" />
+                <div className="space-y-1.5">
+                  <Label>{t("wechat.footerTitle")}</Label>
+                  <label className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer select-none">
+                    <span className="text-sm">{t("wechat.footerElapsed")}</span>
+                    <Switch checked={footerElapsed} onCheckedChange={(v) => updateCredential("footer_elapsed", v ? "true" : "false")} />
+                  </label>
                 </div>
               </div>
             )}
@@ -2037,6 +2103,8 @@ function BotCreationWizard({
     : bot.type;
   const streamingEnabled = bot.credentials.streaming_enabled === "true" || bot.credentials.streaming_enabled === true;
   const groupStreamingEnabled = bot.credentials.group_streaming === "true" || bot.credentials.group_streaming === true;
+  const footerElapsed = bot.credentials.footer_elapsed !== "false" && bot.credentials.footer_elapsed !== false;
+  const footerStatus = bot.credentials.footer_status !== "false" && bot.credentials.footer_status !== false;
   const credMissing = !areCredsFilled(bot.type, bot.credentials);
   const [credWarning, setCredWarning] = useState(false);
 
@@ -2346,6 +2414,18 @@ function BotCreationWizard({
                         ))}
                       </div>
                     </details>
+
+                    <div className="space-y-1.5">
+                      <Label>{t("telegram.footerTitle")}</Label>
+                      <label className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer select-none">
+                        <span className="text-sm">{t("telegram.footerElapsed")}</span>
+                        <Switch checked={footerElapsed} onCheckedChange={(v) => updateCredential("footer_elapsed", v ? "true" : "false")} />
+                      </label>
+                      <label className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer select-none">
+                        <span className="text-sm">{t("telegram.footerStatus")}</span>
+                        <Switch checked={footerStatus} onCheckedChange={(v) => updateCredential("footer_status", v ? "true" : "false")} />
+                      </label>
+                    </div>
                   </div>
                 )}
               </div>
@@ -2384,6 +2464,32 @@ function BotCreationWizard({
                         <p className="text-[11px] text-amber-600 dark:text-amber-400 leading-relaxed">{t("feishu.groupModeHint")}</p>
                       )}
                     </div>
+                    <div className="space-y-1.5">
+                      <Label>{t("feishu.footerTitle")}</Label>
+                      <label className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer select-none">
+                        <span className="text-sm">{t("feishu.footerElapsed")}</span>
+                        <Switch checked={footerElapsed} onCheckedChange={(v) => updateCredential("footer_elapsed", v ? "true" : "false")} />
+                      </label>
+                      <label className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer select-none">
+                        <span className="text-sm">{t("feishu.footerStatus")}</span>
+                        <Switch checked={footerStatus} onCheckedChange={(v) => updateCredential("footer_status", v ? "true" : "false")} />
+                      </label>
+                    </div>
+                  </div>
+                )}
+                {bot.type === "dingtalk" && (
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <Label>{t("dingtalk.footerTitle")}</Label>
+                      <label className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer select-none">
+                        <span className="text-sm">{t("dingtalk.footerElapsed")}</span>
+                        <Switch checked={footerElapsed} onCheckedChange={(v) => updateCredential("footer_elapsed", v ? "true" : "false")} />
+                      </label>
+                      <label className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer select-none">
+                        <span className="text-sm">{t("dingtalk.footerStatus")}</span>
+                        <Switch checked={footerStatus} onCheckedChange={(v) => updateCredential("footer_status", v ? "true" : "false")} />
+                      </label>
+                    </div>
                   </div>
                 )}
                 {bot.type === "qqbot" && (
@@ -2405,6 +2511,24 @@ function BotCreationWizard({
                         <ToggleGroupItem value="websocket">WebSocket</ToggleGroupItem>
                         <ToggleGroupItem value="webhook">Webhook</ToggleGroupItem>
                       </ToggleGroup>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>{t("qqbot.footerTitle")}</Label>
+                      <label className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer select-none">
+                        <span className="text-sm">{t("qqbot.footerElapsed")}</span>
+                        <Switch checked={footerElapsed} onCheckedChange={(v) => updateCredential("footer_elapsed", v ? "true" : "false")} />
+                      </label>
+                    </div>
+                  </div>
+                )}
+                {bot.type === "wechat" && (
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <Label>{t("wechat.footerTitle")}</Label>
+                      <label className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer select-none">
+                        <span className="text-sm">{t("wechat.footerElapsed")}</span>
+                        <Switch checked={footerElapsed} onCheckedChange={(v) => updateCredential("footer_elapsed", v ? "true" : "false")} />
+                      </label>
                     </div>
                   </div>
                 )}

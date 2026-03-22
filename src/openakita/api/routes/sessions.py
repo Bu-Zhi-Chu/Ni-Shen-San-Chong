@@ -40,10 +40,10 @@ async def list_sessions(request: Request, channel: str = "desktop"):
     for s in sessions:
         msgs = s.context.messages
         user_msgs = [m for m in msgs if m.get("role") == "user"]
-        last_user = user_msgs[-1] if user_msgs else None
+        first_user = user_msgs[0] if user_msgs else None
         title = ""
-        if last_user:
-            content = last_user.get("content", "")
+        if first_user:
+            content = first_user.get("content", "")
             title = content[:30] if isinstance(content, str) else ""
 
         last_msg_content = ""

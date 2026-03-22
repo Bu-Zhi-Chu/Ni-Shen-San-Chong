@@ -43,6 +43,7 @@ from .resource_budget import BudgetAction, ResourceBudget, create_budget_from_se
 from .supervisor import RuntimeSupervisor
 from .token_tracking import TokenTrackingContext, reset_tracking_context, set_tracking_context
 from .tool_executor import ToolExecutor
+from ..llm.converters.tools import PARSE_ERROR_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -886,6 +887,36 @@ class ReasoningEngine:
                     f"Consider increasing endpoint max_tokens or reducing tool argument size."
                 )
                 _iter_trace["truncated"] = True
+
+                # 自动扩容 max_tokens 并重试被完全截断的工具调用
+                if decision.type == DecisionType.TOOL_CALLS:
+                    truncated_calls = [
+                        tc for tc in decision.tool_calls
+                        if isinstance(tc.get("input"), dict) and PARSE_ERROR_KEY in tc["input"]
+                    ]
+                    _current_max = self._brain.max_tokens or 16384
+                    _max_ceiling = min(_current_max * 3, 65536)
+                    if truncated_calls and len(truncated_calls) == len(decision.tool_calls):
+                        _new_max = min(_current_max * 2, _max_ceiling)
+                        if _new_max > _current_max:
+                            logger.warning(
+                                f"[ReAct] Iter {iteration+1} — All {len(truncated_calls)} tool "
+                                f"calls truncated. Auto-increasing max_tokens: "
+                                f"{_current_max} → {_new_max} and retrying"
+                            )
+                            self._brain.max_tokens = _new_max
+                            react_trace.append(_iter_trace)
+                            continue
+                    elif truncated_calls:
+                        _new_max = min(int(_current_max * 1.5), _max_ceiling)
+                        if _new_max > _current_max:
+                            logger.warning(
+                                f"[ReAct] Iter {iteration+1} — "
+                                f"{len(truncated_calls)}/{len(decision.tool_calls)} tool calls "
+                                f"truncated. Increasing max_tokens for next iteration: "
+                                f"{_current_max} → {_new_max}"
+                            )
+                            self._brain.max_tokens = _new_max
 
             # ==================== 决策分支 ====================
 
@@ -1813,6 +1844,37 @@ class ReasoningEngine:
                         f"Tool calls may have incomplete JSON arguments."
                     )
                     _iter_trace["truncated"] = True
+
+                    # 自动扩容 max_tokens 并重试（与 run() 一致）
+                    if decision.type == DecisionType.TOOL_CALLS:
+                        truncated_calls = [
+                            tc for tc in decision.tool_calls
+                            if isinstance(tc.get("input"), dict) and PARSE_ERROR_KEY in tc["input"]
+                        ]
+                        _current_max = self._brain.max_tokens or 16384
+                        _max_ceiling = min(_current_max * 3, 65536)
+                        if truncated_calls and len(truncated_calls) == len(decision.tool_calls):
+                            _new_max = min(_current_max * 2, _max_ceiling)
+                            if _new_max > _current_max:
+                                logger.warning(
+                                    f"[ReAct-Stream] Iter {_iteration+1} — All "
+                                    f"{len(truncated_calls)} tool calls truncated. "
+                                    f"Auto-increasing max_tokens: "
+                                    f"{_current_max} → {_new_max} and retrying"
+                                )
+                                self._brain.max_tokens = _new_max
+                                react_trace.append(_iter_trace)
+                                continue
+                        elif truncated_calls:
+                            _new_max = min(int(_current_max * 1.5), _max_ceiling)
+                            if _new_max > _current_max:
+                                logger.warning(
+                                    f"[ReAct-Stream] Iter {_iteration+1} — "
+                                    f"{len(truncated_calls)}/{len(decision.tool_calls)} tool "
+                                    f"calls truncated. Increasing max_tokens for next "
+                                    f"iteration: {_current_max} → {_new_max}"
+                                )
+                                self._brain.max_tokens = _new_max
 
                 # ==================== FINAL_ANSWER ====================
                 if decision.type == DecisionType.FINAL_ANSWER:

@@ -276,6 +276,7 @@ class WeChatAdapter(ChannelAdapter):
         channel_name: str | None = None,
         bot_id: str | None = None,
         agent_profile_id: str = "default",
+        footer_elapsed: bool | None = None,
     ):
         super().__init__(
             channel_name=channel_name,
@@ -315,6 +316,12 @@ class WeChatAdapter(ChannelAdapter):
 
         # 发送限流 (user_id → 上次发送时间戳)
         self._last_send_ts: dict[str, float] = {}
+
+        # 耗时统计 (chat_id → 首次 send_typing 的 time.time())
+        self._typing_start_time: dict[str, float] = {}
+        self._footer_elapsed: bool = footer_elapsed if footer_elapsed is not None else (
+            os.environ.get("WECHAT_FOOTER_ELAPSED", "true").lower() in ("true", "1", "yes")
+        )
 
         # 统计指标
         self._msg_count: int = 0
@@ -956,6 +963,8 @@ class WeChatAdapter(ChannelAdapter):
     # 因此无法实现"单气泡流式更新"。仅使用原生 typing 指示器。
 
     async def send_typing(self, chat_id: str, thread_id: str | None = None) -> None:
+        if chat_id not in self._typing_start_time:
+            self._typing_start_time[chat_id] = time.time()
         ticket = await self._get_typing_ticket(chat_id)
         if not ticket:
             return
@@ -973,6 +982,7 @@ class WeChatAdapter(ChannelAdapter):
             logger.debug(f"{self.channel_name}: sendTyping failed (ignored)")
 
     async def clear_typing(self, chat_id: str, thread_id: str | None = None) -> None:
+        self._typing_start_time.pop(chat_id, None)
         ticket = await self._get_typing_ticket(chat_id)
         if not ticket:
             return
@@ -988,6 +998,19 @@ class WeChatAdapter(ChannelAdapter):
             )
         except Exception:
             logger.debug(f"{self.channel_name}: clearTyping failed (ignored)")
+
+    def format_final_footer(self, chat_id: str, thread_id: str | None = None) -> str | None:
+        if not self._footer_elapsed:
+            return None
+        start = self._typing_start_time.pop(chat_id, None)
+        if start is None:
+            return None
+        elapsed = time.time() - start
+        if elapsed < 60:
+            return f"\n\n⏱ 耗时 {elapsed:.1f}s"
+        minutes = int(elapsed // 60)
+        secs = elapsed % 60
+        return f"\n\n⏱ 耗时 {minutes}m{secs:.0f}s"
 
     async def _get_typing_ticket(self, user_id: str) -> str:
         now = time.time()

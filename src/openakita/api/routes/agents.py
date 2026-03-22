@@ -213,8 +213,18 @@ async def delete_bot(bot_id: str):
         logger.info(f"[Agents API] Deleted bot: {bot_id}")
 
         if deleted:
-            from openakita.main import remove_im_bot
+            from openakita.main import remove_im_bot, _bot_channel_name, get_message_gateway
             await remove_im_bot(deleted[0])
+
+            channel_name = _bot_channel_name(deleted[0])
+            gw = get_message_gateway()
+            if gw and gw.session_manager:
+                purged = gw.session_manager.purge_channel(channel_name)
+                if purged:
+                    logger.info(
+                        f"[Agents API] Purged {purged} sessions for deleted bot: "
+                        f"{channel_name}"
+                    )
 
         return {"status": "ok"}
     finally:

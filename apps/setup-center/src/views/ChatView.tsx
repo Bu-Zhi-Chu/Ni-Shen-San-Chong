@@ -2023,6 +2023,7 @@ export function ChatView({
     const conv = conversations.find((c) => c.id === activeConvId);
     if (multiAgentEnabled) {
       const agentId = conv?.agentProfileId || "default";
+      isConvSwitchRef.current = true;
       setSelectedAgent(agentId);
     }
     setSelectedEndpoint(conv?.endpointId || "auto");
@@ -2100,11 +2101,17 @@ export function ChatView({
   // Sync selectedAgent → current conversation's agentProfileId
   // Only react to selectedAgent changes (not activeConvId) to avoid overwriting
   // a newly-switched conversation with the previous conversation's agent.
+  // isConvSwitchRef prevents write-back when selectedAgent was set by a conversation switch.
   const prevSelectedAgentRef = useRef(selectedAgent);
+  const isConvSwitchRef = useRef(false);
   useEffect(() => {
     if (!multiAgentEnabled) return;
     if (selectedAgent === prevSelectedAgentRef.current) return;
     prevSelectedAgentRef.current = selectedAgent;
+    if (isConvSwitchRef.current) {
+      isConvSwitchRef.current = false;
+      return;
+    }
     const convId = activeConvIdRef.current;
     if (!convId) return;
     setConversations((prev) => {
@@ -2226,7 +2233,7 @@ export function ChatView({
               lastMessage: b.lastMessage || local.lastMessage,
               timestamp: Math.max(local.timestamp || 0, b.timestamp || 0),
               messageCount: Math.max(local.messageCount || 0, b.messageCount || 0),
-              agentProfileId: local.agentProfileId || b.agentProfileId,
+              agentProfileId: b.agentProfileId || local.agentProfileId,
             };
           });
           const backendIds = new Set(restoredConvs.map((c) => c.id));

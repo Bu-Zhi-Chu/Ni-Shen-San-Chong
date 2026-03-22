@@ -9,6 +9,7 @@ import {
   IconGear, IconBook, IconStorefront, IconPuzzle, IconFingerprint,
 } from "../icons";
 import logoUrl from "../assets/logo.png";
+import { openExternalUrl } from "../platform";
 
 type ViewId = "wizard" | "status" | "chat" | "skills" | "im" | "onboarding" | "token_stats" | "mcp" | "scheduler" | "memory" | "identity" | "dashboard" | "agent_manager" | "agent_store" | "skill_store";
 
@@ -239,15 +240,15 @@ export function Sidebar({
           {backendVersion && <div>Backend v{backendVersion}</div>}
           {!backendVersion && serviceRunning && <div>Backend: -</div>}
           <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-            <a
-              href="https://openakita.ai"
-              style={{ color: "var(--accent, #5B8DEF)", textDecoration: "none", opacity: 1, display: "inline-flex", alignItems: "center", gap: 3 }}
+            <span
+              onClick={() => openExternalUrl("https://openakita.ai")}
+              style={{ color: "var(--accent, #5B8DEF)", textDecoration: "none", opacity: 1, display: "inline-flex", alignItems: "center", gap: 3, cursor: "pointer" }}
               onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
               onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
             >
               <IconGlobe size={11} />
               openakita.ai
-            </a>
+            </span>
             {serviceRunning && (
               <span
                 onClick={onBugReport}
@@ -260,20 +261,20 @@ export function Sidebar({
                 <span className="feedbackText" style={{ fontSize: 11 }}>{t("feedback.trigger")}</span>
               </span>
             )}
-            <a
-              href="https://github.com/openakita/openakita"
+            <span
+              onClick={() => openExternalUrl("https://github.com/openakita/openakita")}
               title="GitHub"
-              style={{ color: "var(--accent, #5B8DEF)", opacity: 1, display: "inline-flex", alignItems: "center" }}
+              style={{ color: "var(--accent, #5B8DEF)", opacity: 1, display: "inline-flex", alignItems: "center", cursor: "pointer" }}
             >
               <IconGitHub size={13} />
-            </a>
-            <a
-              href="https://gitee.com/zacon365/openakita"
+            </span>
+            <span
+              onClick={() => openExternalUrl("https://gitee.com/zacon365/openakita")}
               title="Gitee"
-              style={{ color: "var(--accent, #5B8DEF)", opacity: 1, display: "inline-flex", alignItems: "center" }}
+              style={{ color: "var(--accent, #5B8DEF)", opacity: 1, display: "inline-flex", alignItems: "center", cursor: "pointer" }}
             >
               <IconGitee size={13} />
-            </a>
+            </span>
           </div>
         </div>
       )}
@@ -288,13 +289,13 @@ export function Sidebar({
           gap: 6,
         }}>
           <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
-            <a
-              href="https://openakita.ai"
+            <span
+              onClick={() => openExternalUrl("https://openakita.ai")}
               title="openakita.ai"
-              style={{ color: "var(--accent, #5B8DEF)", opacity: 0.5, display: "flex" }}
+              style={{ color: "var(--accent, #5B8DEF)", opacity: 0.5, display: "flex", cursor: "pointer" }}
             >
               <IconGlobe size={14} />
-            </a>
+            </span>
             {serviceRunning && (
               <span
                 onClick={onBugReport}
@@ -306,20 +307,20 @@ export function Sidebar({
             )}
           </div>
           <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
-            <a
-              href="https://github.com/openakita/openakita"
+            <span
+              onClick={() => openExternalUrl("https://github.com/openakita/openakita")}
               title="GitHub"
-              style={{ color: "var(--accent, #5B8DEF)", opacity: 0.5, display: "flex" }}
+              style={{ color: "var(--accent, #5B8DEF)", opacity: 0.5, display: "flex", cursor: "pointer" }}
             >
               <IconGitHub size={14} />
-            </a>
-            <a
-              href="https://gitee.com/zacon365/openakita"
+            </span>
+            <span
+              onClick={() => openExternalUrl("https://gitee.com/zacon365/openakita")}
               title="Gitee"
-              style={{ color: "var(--accent, #5B8DEF)", opacity: 0.5, display: "flex" }}
+              style={{ color: "var(--accent, #5B8DEF)", opacity: 0.5, display: "flex", cursor: "pointer" }}
             >
               <IconGitee size={14} />
-            </a>
+            </span>
           </div>
         </div>
       )}
