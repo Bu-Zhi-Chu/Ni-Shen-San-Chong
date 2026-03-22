@@ -309,9 +309,19 @@ async def _stream_chat(
         _disconnect_watcher_task = asyncio.create_task(_disconnect_watcher())
 
         # --- 主 SSE 事件循环：从 queue 读取事件并转发 ---
+        # 每 SSE_KEEPALIVE_INTERVAL 秒无真实事件时发送 keepalive，
+        # 防止前端 fetch 连接因长时间无数据而超时断开（LLM 重试等场景）。
+        SSE_KEEPALIVE_INTERVAL = 15.0
         _agent_errored = False
         while True:
-            event = await _agent_queue.get()
+            try:
+                event = await asyncio.wait_for(
+                    _agent_queue.get(), timeout=SSE_KEEPALIVE_INTERVAL
+                )
+            except TimeoutError:
+                if not _client_disconnected and not await _check_disconnected():
+                    yield _sse("heartbeat", {"ts": time.time()})
+                continue
             if event is None:
                 break
 

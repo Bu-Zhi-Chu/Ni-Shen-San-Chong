@@ -273,6 +273,9 @@ def parse_text_tool_calls(text: str) -> tuple[str, list[ToolUseBlock]]:
     支持格式：
     1. <function_calls>...</function_calls> 块
     2. <minimax:tool_call>...</minimax:tool_call> 块（MiniMax 格式）
+    3. <<|tool_calls_section_begin|>> 格式（Kimi K2）
+    4. JSON 格式: {"name": "tool", "arguments": {...}}
+    5. .tool_name(kwargs) 格式（Python 风格，Qwen 等模型常见）
 
     Args:
         text: LLM 返回的文本内容
@@ -320,8 +323,21 @@ def parse_text_tool_calls(text: str) -> tuple[str, list[ToolUseBlock]]:
             clean_text = json_clean
             _json_parsed = True
 
-    # 清理文本，移除已解析的工具调用（格式 1-3 的清理；格式 4 已在上面处理）
-    if tool_calls and not _json_parsed:
+    # === 格式 5: .tool_name(kwargs) (Python 风格，Qwen 等模型常见) ===
+    _dot_parsed = False
+    if not tool_calls and _has_dot_style_tool_calls(text):
+        dot_clean, dot_tool_calls = _parse_dot_style_tool_calls(text)
+        if dot_tool_calls:
+            tool_calls.extend(dot_tool_calls)
+            clean_text = dot_clean
+            _dot_parsed = True
+            logger.info(
+                f"[parse_text_tool_calls] Extracted {len(dot_tool_calls)} dot-style "
+                f"tool call(s): {[tc.name for tc in dot_tool_calls]}"
+            )
+
+    # 清理文本，移除已解析的工具调用（格式 1-3 的清理；格式 4/5 已在上面处理）
+    if tool_calls and not _json_parsed and not _dot_parsed:
         # 移除 function_calls 块
         clean_text = re.sub(
             r"<function_calls>.*?</function_calls>", "", text, flags=re.DOTALL | re.IGNORECASE
@@ -702,10 +718,161 @@ def has_text_tool_calls(text: str) -> bool:
     - <minimax:tool_call> 格式（MiniMax）
     - <<|tool_calls_section_begin|>> 格式（Kimi K2）
     - JSON 格式: {"name": "tool", "arguments": {...}} 或 {{"name": ...}}
+    - .tool_name(kwargs) 格式（部分模型如 Qwen 会在文本中嵌入 Python 风格调用）
     """
     return bool(
         re.search(r"<function_calls>", text, re.IGNORECASE)
         or re.search(r"<minimax:tool_call>", text, re.IGNORECASE)
         or re.search(r"<<\|tool_calls_section_begin\|>>", text)
         or _has_json_tool_calls(text)
+        or _has_dot_style_tool_calls(text)
     )
+
+
+# 已知的工具名集合（用于 dot-style 检测时减少误判）
+_KNOWN_TOOL_NAMES: set[str] = {
+    "web_search", "news_search", "browser_navigate", "browser_open",
+    "browser_click", "browser_type", "browser_scroll", "browser_screenshot",
+    "browser_wait", "browser_close", "browser_go_back", "browser_switch_tab",
+    "browser_task", "browser_get_content", "view_image",
+    "run_shell", "write_file", "read_file", "list_directory",
+    "send_message", "reply_message", "create_file", "edit_file",
+    "search_files", "delete_file", "move_file", "copy_file",
+    "ask_user", "generate_image", "deliver_artifacts", "send_sticker",
+    "get_voice_file", "get_image_file", "get_chat_history", "get_chat_info",
+    "get_user_info", "get_chat_members", "get_recent_messages",
+    "create_plan", "update_plan_step", "get_plan_status", "complete_plan",
+    "delegate_to_agent", "spawn_agent", "delegate_parallel", "create_agent",
+    "call_mcp_tool", "list_mcp_servers",
+    "desktop_screenshot", "enable_thinking", "get_session_logs",
+    "switch_persona", "update_persona_trait",
+}
+
+
+def _has_dot_style_tool_calls(text: str) -> bool:
+    """检测文本中是否包含 .tool_name(kwargs) 格式的工具调用。
+
+    部分模型（如 qwen3-coder, qwen3.5）在文本中以 Python 函数调用风格嵌入工具调用，
+    而不使用原生 function calling API。
+    """
+    pattern = r"\.([a-z][a-z0-9_]{2,})\s*\("
+    for m in re.finditer(pattern, text):
+        if m.group(1) in _KNOWN_TOOL_NAMES:
+            return True
+    return False
+
+
+def _parse_dot_style_tool_calls(text: str) -> tuple[str, list[ToolUseBlock]]:
+    """解析文本中 .tool_name(kwargs) 格式的工具调用。
+
+    支持：
+    - .web_search(query="AI 情感计算", max_results=10)
+    - .browser_navigate(url="https://example.com")
+    - .run_shell(command="ls -la", timeout=60)
+
+    Returns:
+        (clean_text, tool_calls): 移除工具调用后的文本和解析出的工具调用列表
+    """
+    tool_calls: list[ToolUseBlock] = []
+    clean_text = text
+
+    pattern = r"\.([a-z][a-z0-9_]{2,})\s*\("
+    matches = list(re.finditer(pattern, text))
+
+    spans_to_remove: list[tuple[int, int]] = []
+
+    for m in matches:
+        tool_name = m.group(1)
+        if tool_name not in _KNOWN_TOOL_NAMES:
+            continue
+
+        paren_start = m.end() - 1  # position of '('
+        paren_end = _find_matching_paren(text, paren_start)
+        if paren_end < 0:
+            continue
+
+        args_str = text[paren_start + 1 : paren_end]
+        arguments = _parse_python_kwargs(args_str)
+
+        tool_calls.append(ToolUseBlock(
+            id=f"dot_{uuid.uuid4().hex[:12]}",
+            name=tool_name,
+            input=arguments,
+        ))
+
+        dot_start = m.start()
+        span_end = paren_end + 1
+        spans_to_remove.append((dot_start, span_end))
+
+    if spans_to_remove:
+        parts: list[str] = []
+        prev_end = 0
+        for start, end in sorted(spans_to_remove):
+            parts.append(text[prev_end:start])
+            prev_end = end
+        parts.append(text[prev_end:])
+        clean_text = "".join(parts).strip()
+
+    return clean_text, tool_calls
+
+
+def _find_matching_paren(text: str, start: int) -> int:
+    """找到与 start 位置的 '(' 匹配的 ')' 位置，考虑引号内的括号。"""
+    if start >= len(text) or text[start] != "(":
+        return -1
+
+    depth = 0
+    in_single_quote = False
+    in_double_quote = False
+    escape_next = False
+
+    for i in range(start, len(text)):
+        ch = text[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\":
+            escape_next = True
+            continue
+        if ch == "'" and not in_double_quote:
+            in_single_quote = not in_single_quote
+        elif ch == '"' and not in_single_quote:
+            in_double_quote = not in_double_quote
+        elif not in_single_quote and not in_double_quote:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    return i
+    return -1
+
+
+def _parse_python_kwargs(args_str: str) -> dict:
+    """将 Python 风格的 kwargs 字符串解析为 dict。
+
+    例如: 'query="AI 情感计算", max_results=10' → {"query": "AI 情感计算", "max_results": 10}
+    """
+    import ast
+
+    args_str = args_str.strip()
+    if not args_str:
+        return {}
+
+    try:
+        tree = ast.parse(f"_f({args_str})", mode="eval")
+        call_node = tree.body
+        if not isinstance(call_node, ast.Call):
+            return {"raw_args": args_str}
+
+        result = {}
+        for kw in call_node.keywords:
+            if kw.arg is None:
+                continue
+            try:
+                result[kw.arg] = ast.literal_eval(kw.value)
+            except (ValueError, TypeError):
+                result[kw.arg] = ast.unparse(kw.value)
+        return result if result else {"raw_args": args_str}
+    except (SyntaxError, ValueError, TypeError):
+        return {"raw_args": args_str}

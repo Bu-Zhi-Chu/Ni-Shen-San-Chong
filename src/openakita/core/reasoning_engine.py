@@ -3046,6 +3046,35 @@ class ReasoningEngine:
             except Exception as e:
                 logger.debug(f"[_parse_decision] Thinking tool-call check failed: {e}")
 
+        # 防御层：从 text_content 中提取嵌入的工具调用（Python dot-style 等）。
+        # 部分模型（如 qwen3-coder, qwen3.5）不使用原生 function calling，
+        # 而是在文本中输出 .web_search(query="...") 风格的工具调用。
+        if not tool_calls and text_content:
+            try:
+                from ..llm.converters.tools import has_text_tool_calls, parse_text_tool_calls
+                if has_text_tool_calls(text_content):
+                    _clean, embedded_tool_calls = parse_text_tool_calls(text_content)
+                    if embedded_tool_calls:
+                        text_content = _clean
+                        for tc in embedded_tool_calls:
+                            tool_calls.append({
+                                "id": tc.id,
+                                "name": tc.name,
+                                "input": tc.input,
+                            })
+                            assistant_content.append({
+                                "type": "tool_use",
+                                "id": tc.id,
+                                "name": tc.name,
+                                "input": tc.input,
+                            })
+                        logger.warning(
+                            f"[_parse_decision] Recovered {len(embedded_tool_calls)} tool calls "
+                            f"from text content: {[tc.name for tc in embedded_tool_calls]}"
+                        )
+            except Exception as e:
+                logger.debug(f"[_parse_decision] Text tool-call check failed: {e}")
+
         # 防御层：剥离 text_content 末尾的裸工具名。
         # 部分模型会在 content 中输出 "用户原文\nbrowser_open" 这类垃圾，
         # 其中裸工具名既不是合法工具调用（无参数/格式），也不是有意义的回复。

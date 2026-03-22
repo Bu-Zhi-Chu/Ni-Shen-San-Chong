@@ -2743,9 +2743,15 @@ export function ChatView({
       const _recoverUserTs = userMsg.timestamp;
       const _recoverKey = STORAGE_KEY_MSGS_PREFIX + thisConvId;
       let attempts = 0;
-      const maxAttempts = 10;
-      const pollInterval = 3000;
+      const maxAttempts = 40;
+      const basePollInterval = 3000;
       let lastContentLen = 0;
+
+      const getInterval = () => {
+        if (attempts <= 10) return basePollInterval;
+        if (attempts <= 20) return 5000;
+        return 8000;
+      };
 
       const poll = () => {
         attempts++;
@@ -2753,7 +2759,7 @@ export function ChatView({
           .then((r) => r.ok ? r.json() : null)
           .then((data) => {
             if (!data) {
-              if (attempts < maxAttempts) setTimeout(poll, pollInterval);
+              if (attempts < maxAttempts) setTimeout(poll, getInterval());
               return;
             }
             const rows = Array.isArray(data?.messages) ? data.messages : [];
@@ -2767,7 +2773,7 @@ export function ChatView({
             );
             const lastAssistant = (newerThanUser.length > 0 ? newerThanUser : candidates).slice(-1)[0];
             if (!lastAssistant?.content) {
-              if (attempts < maxAttempts) setTimeout(poll, pollInterval);
+              if (attempts < maxAttempts) setTimeout(poll, getInterval());
               return;
             }
             const contentLen = (lastAssistant.content as string).length;
@@ -2791,11 +2797,11 @@ export function ChatView({
               return updated;
             });
             if (contentGrowing && attempts < maxAttempts) {
-              setTimeout(poll, pollInterval);
+              setTimeout(poll, getInterval());
             }
           })
           .catch(() => {
-            if (attempts < maxAttempts) setTimeout(poll, pollInterval);
+            if (attempts < maxAttempts) setTimeout(poll, getInterval());
             else logger.warn("Chat", "SSE recovery polling exhausted", { convId });
           });
       };
@@ -3450,7 +3456,7 @@ export function ChatView({
             const errMsg = e instanceof Error ? e.message : String(e);
             let guidance = t("chat.backendServiceHint");
             try {
-              const healthRes = await fetch(`${apiBase}/api/health`, { signal: AbortSignal.timeout(2000) });
+              const healthRes = await fetch(`${apiBase}/api/health`, { signal: AbortSignal.timeout(5000) });
               if (healthRes.ok) {
                 guidance = t("chat.backendOnlineUpstreamHint");
               }

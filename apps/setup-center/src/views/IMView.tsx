@@ -286,6 +286,7 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const isFirstLoad = useRef(true);
+  const oldestLoadedOffset = useRef(0);
 
   const [inlineEditSessionId, setInlineEditSessionId] = useState<string | null>(null);
   const [inlineEditValue, setInlineEditValue] = useState("");
@@ -342,16 +343,18 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
     return [];
   }, [serviceRunning, apiBase]);
 
-  const fetchMessages = useCallback(async (sessionId: string, limit = 50, offset = 0, df?: string, dt?: string) => {
+  const fetchMessages = useCallback(async (sessionId: string, limit = 50, offset = 0, df?: string, dt?: string, latest = false) => {
     if (!serviceRunning) return;
     try {
       const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
       if (df) params.set("date_from", df);
       if (dt) params.set("date_to", dt);
+      if (latest) params.set("latest", "true");
       const res = await safeFetch(`${apiBase}/api/im/sessions/${encodeURIComponent(sessionId)}/messages?${params}`);
       const data = await res.json();
       setMessages(data.messages || []);
       setTotalMessages(data.total || 0);
+      oldestLoadedOffset.current = data.offset ?? 0;
     } catch { /* ignore */ }
   }, [serviceRunning, apiBase]);
 
@@ -390,9 +393,9 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
 
   useEffect(() => {
     if (!serviceRunning || !selectedSessionId) return;
-    fetchMessages(selectedSessionId, 50, 0, dateFrom || undefined, dateTo || undefined);
+    fetchMessages(selectedSessionId, 50, 0, dateFrom || undefined, dateTo || undefined, true);
     const msgTimer = setInterval(() => {
-      fetchMessages(selectedSessionId, 50, 0, dateFrom || undefined, dateTo || undefined);
+      fetchMessages(selectedSessionId, 50, 0, dateFrom || undefined, dateTo || undefined, true);
     }, IS_WEB ? 30_000 : 8000);
     return () => clearInterval(msgTimer);
   }, [serviceRunning, selectedSessionId, fetchMessages, dateFrom, dateTo]);
@@ -407,7 +410,7 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
         if (selectedChannel && (!evtChannel || evtChannel === selectedChannel)) {
           fetchSessions(selectedChannel);
         }
-        if (selectedSessionId) fetchMessages(selectedSessionId);
+        if (selectedSessionId) fetchMessages(selectedSessionId, 50, 0, undefined, undefined, true);
       }
       if (event === "im:bot_config_changed") {
         if (selectedChannel) fetchSessions(selectedChannel);
@@ -424,7 +427,7 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
       const first = list[0];
       setSelectedSessionId(first.sessionId);
       isFirstLoad.current = true;
-      fetchMessages(first.sessionId);
+      fetchMessages(first.sessionId, 50, 0, undefined, undefined, true);
     }
   }, [fetchSessions, fetchMessages]);
 
@@ -433,26 +436,29 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
     setSelectMode(false);
     setSelectedMsgIds(new Set());
     isFirstLoad.current = true;
-    fetchMessages(sid);
+    fetchMessages(sid, 50, 0, undefined, undefined, true);
   }, [fetchMessages]);
 
   const handleLoadMore = useCallback(async () => {
-    if (!selectedSessionId || loadingMore) return;
+    if (!selectedSessionId || loadingMore || oldestLoadedOffset.current <= 0) return;
     const container = scrollContainerRef.current;
     const prevScrollHeight = container?.scrollHeight ?? 0;
     setLoadingMore(true);
     try {
-      const nextOffset = messages.length;
-      const params = new URLSearchParams({ limit: "50", offset: String(nextOffset) });
+      const batchSize = 50;
+      const newOffset = Math.max(0, oldestLoadedOffset.current - batchSize);
+      const actualLimit = oldestLoadedOffset.current - newOffset;
+      const params = new URLSearchParams({ limit: String(actualLimit), offset: String(newOffset) });
       if (dateFrom) params.set("date_from", dateFrom);
       if (dateTo) params.set("date_to", dateTo);
       const res = await safeFetch(
         `${apiBase}/api/im/sessions/${encodeURIComponent(selectedSessionId)}/messages?${params}`,
       );
       const data = await res.json();
-      const more: IMMessage[] = data.messages || [];
-      if (more.length) {
-        setMessages((prev) => [...prev, ...more]);
+      const older: IMMessage[] = data.messages || [];
+      if (older.length) {
+        oldestLoadedOffset.current = newOffset;
+        setMessages((prev) => [...older, ...prev]);
         requestAnimationFrame(() => {
           if (container) {
             container.scrollTop += container.scrollHeight - prevScrollHeight;
@@ -462,7 +468,7 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
       setTotalMessages(data.total || totalMessages);
     } catch { /* ignore */ }
     setLoadingMore(false);
-  }, [apiBase, selectedSessionId, messages.length, totalMessages, loadingMore, dateFrom, dateTo]);
+  }, [apiBase, selectedSessionId, totalMessages, loadingMore, dateFrom, dateTo]);
 
   const handleDeleteMessages = useCallback(async () => {
     if (!selectedSessionId || selectedMsgIds.size === 0) return;
@@ -509,7 +515,7 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
     if (!sentinel || !container) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting && messages.length < totalMessages && !loadingMore) {
+        if (entries[0]?.isIntersecting && oldestLoadedOffset.current > 0 && !loadingMore) {
           handleLoadMore();
         }
       },
@@ -517,7 +523,7 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [messages.length, totalMessages, loadingMore, handleLoadMore]);
+  }, [totalMessages, loadingMore, handleLoadMore]);
 
   const handleDeleteSession = useCallback((s: IMSession, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -887,7 +893,7 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
               <div ref={scrollContainerRef} className="flex-1 overflow-auto px-4 py-3 space-y-3">
                 {/* Top sentinel for infinite scroll */}
                 <div ref={topSentinelRef} className="h-px" />
-                {messages.length < totalMessages && (
+                {oldestLoadedOffset.current > 0 && (
                   <div className="flex justify-center py-1">
                     {loadingMore && <Loader2 className="animate-spin size-4 text-muted-foreground" />}
                   </div>
